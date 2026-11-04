@@ -111,7 +111,7 @@ function prepareCanvas() {
     const scale = Math.min(maxW / pet.image.naturalWidth, maxH / pet.image.naturalHeight, 1);
     const w = Math.max(1, Math.round(pet.image.naturalWidth * scale));
     const h = Math.max(1, Math.round(pet.image.naturalHeight * scale));
-    canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+    canvas.style.width = w + 'px'; canvas.style.height = h + 'px'; canvas.style.display = 'block';
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
     pet.width = w; pet.height = h;
@@ -306,7 +306,7 @@ function mount() {
         await clearPetImage(); stopFrame(); pet.pointer = null; pet.image = null;
         if (pet.url) URL.revokeObjectURL(pet.url); pet.url = '';
         const canvas = root.querySelector('#lp-pet-canvas');
-        canvas.width = 1; canvas.height = 1; canvas.style.width = '0'; canvas.style.height = '0';
+        canvas.width = 1; canvas.height = 1; canvas.style.width = '0'; canvas.style.height = '0'; canvas.style.display = 'none';
         root.querySelector('#lp-empty').hidden = false; toast('已移除桌宠图片');
     });
     for (const key of ['brush', 'strength', 'softness']) {
