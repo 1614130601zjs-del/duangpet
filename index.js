@@ -1,597 +1,473 @@
-// 小小桌宠 · 独立 SillyTavern 扩展
-// 形变引擎参考并移植自作者自己的 duangduang：WebGL 网格、局部高斯权重与弹簧回弹。
-// 本扩展移除页面选图/原图抓取，改为独立桌宠 PNG 舞台与可调自由笔刷。
 import { extension_settings } from '/scripts/extensions.js';
 import { saveSettingsDebounced } from '/script.js';
 
-const EXT = 'littlepet';
-const DEFAULTS = { enabled: true, ballX: 1, ballY: .58, brush: 24, strength: 72, softness: 76, feedback: 100, shake: false };
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-function cfg() {
-    if (!extension_settings[EXT]) extension_settings[EXT] = {};
-    const c = extension_settings[EXT];
-    for (const [k, v] of Object.entries(DEFAULTS)) if (c[k] === undefined) c[k] = v;
-    return c;
+const EXT='littlepet';
+const defaults={enabled:true,ballX:1,ballY:.58,ballSize:56,jellyOn:true,jellyScope:'local',jellyTap:false,jellyDrag:true,jellyShake:false,jellyStrength:'mid',jellyBrush:.075,feedbackRange:100};
+function ddCfg(){
+ if(!extension_settings[EXT])extension_settings[EXT]={};
+ const c=extension_settings[EXT];
+ for(const k of Object.keys(defaults))if(c[k]===undefined)c[k]=defaults[k];
+ // 旧版只存一张上传图 ballCustom，迁移成列表
+ if(c.ballCustom){if(!Array.isArray(c.ballCustoms))c.ballCustoms=[];if(!c.ballCustoms.length)c.ballCustoms.push({id:'u1',url:c.ballCustom});if(c.ballIcon==='custom')c.ballIcon='custom:'+c.ballCustoms[0].id;delete c.ballCustom;}
+ if(!Array.isArray(c.ballCustoms))c.ballCustoms=[];
+ // 没手动挑过图标的人，自动换成内置的果冻图标
+ if(c.ballIcon==='default'&&!c.ballIconPicked&&typeof DD_BUILTIN_ICONS!=='undefined'&&DD_BUILTIN_ICONS.includes('jelly.png'))c.ballIcon='jelly.png';
+ return c;
 }
-function save() { try { saveSettingsDebounced(); } catch {} }
+const ddSave=()=>{try{saveSettingsDebounced();}catch{}};
 
-const DB_NAME = 'little-pet-assets';
-function openAssetDB() {
-    return new Promise((resolve, reject) => {
-        if (!('indexedDB' in window)) return reject(new Error('当前浏览器不支持本地图片存储'));
-        const req = indexedDB.open(DB_NAME, 1);
-        req.onupgradeneeded = () => req.result.createObjectStore('assets');
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error || new Error('打开图片仓库失败'));
-    });
+// ===== 放大图小互动（果冻）：范围（局部 / 抹开 / 全屏）× 选区（可选）× 交互（点击 / 拖动 / 摇晃） =====
+// 弹簧动画只在触摸 / 拖动 / 摇晃时跑，松手停稳后自动结束；选区只在放大图打开期间保留。
+const DD_JELLY_MW=48,DD_JELLY_MH=48;
+function ddJellyCfg(){
+ const c=ddCfg();
+ if(typeof c.jellyOn!=='boolean'){
+  const m=c.jellyMode;
+  c.jellyOn=['squish','pull','both','wobble'].includes(m);
+  c.jellyTap=m!=='pull';c.jellyDrag=m!=='squish';
+ }
+ if(typeof c.jellyTap!=='boolean')c.jellyTap=true;
+ if(typeof c.jellyDrag!=='boolean')c.jellyDrag=true;
+ if(typeof c.jellyShake!=='boolean')c.jellyShake=false;
+ return {on:c.jellyOn,scope:['smudge','whole'].includes(c.jellyScope)?c.jellyScope:'local',tap:false,drag:c.jellyDrag,shake:c.jellyShake,amp:{soft:.35,mid:.5,bouncy:.65}[c.jellyStrength]||.5};
 }
-async function putPetImage(blob) {
-    const db = await openAssetDB();
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction('assets', 'readwrite');
-        tx.objectStore('assets').put(blob, 'pet-image');
-        tx.oncomplete = () => { db.close(); resolve(); };
-        tx.onerror = () => { db.close(); reject(tx.error || new Error('保存图片失败')); };
-    });
+function ddJellyBrush(){const b=Number(ddCfg().jellyBrush);return Number.isFinite(b)&&b>0?Math.max(.02,Math.min(.2,b)):.075;}
+function ddJellyState(img){
+ if(!img._ddJ)img._ddJ={mask:new Float32Array(DD_JELLY_MW*DD_JELLY_MH),has:false,selecting:false};
+ return img._ddJ;
 }
-async function getPetImage() {
-    const db = await openAssetDB();
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction('assets', 'readonly');
-        const req = tx.objectStore('assets').get('pet-image');
-        req.onsuccess = () => { db.close(); resolve(req.result || null); };
-        req.onerror = () => { db.close(); reject(req.error || new Error('读取图片失败')); };
-    });
+function ddJellyClearSelection(img){
+ if(!img)return;const S=ddJellyState(img);S.mask.fill(0);S.has=false;S.selecting=false;
 }
-async function putAsset(key, value) {
-    const db = await openAssetDB();
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction('assets', 'readwrite');
-        tx.objectStore('assets').put(value, key);
-        tx.oncomplete = () => { db.close(); resolve(); };
-        tx.onerror = () => { db.close(); reject(tx.error || new Error('保存选区失败')); };
-    });
+async function ddJellyEnableMotion(setMsg){
+ const say=t=>{try{setMsg&&setMsg(t);}catch{}};
+ if(typeof DeviceMotionEvent==='undefined'){say('此浏览器不支持摇晃感应');return false;}
+ if(typeof DeviceMotionEvent.requestPermission==='function'){
+  try{const r=await DeviceMotionEvent.requestPermission();if(r!=='granted'){say('没有拿到动作传感器权限');return false;}}
+  catch{say('请求动作传感器权限失败');return false;}
+ }
+ let got=false;const h=()=>{got=true;};window.addEventListener('devicemotion',h);
+ setTimeout(()=>{window.removeEventListener('devicemotion',h);say(got?'摇晃已就绪：晃一晃手机试试':'没收到传感器数据：请确认是用 http://127.0.0.1 或 https 打开的酒馆，并且系统没有关闭动作传感器');},1500);
+ return true;
 }
-async function getAsset(key) {
-    const db = await openAssetDB();
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction('assets', 'readonly');
-        const req = tx.objectStore('assets').get(key);
-        req.onsuccess = () => { db.close(); resolve(req.result || null); };
-        req.onerror = () => { db.close(); reject(req.error || new Error('读取选区失败')); };
-    });
+function ddAttachJelly(img){
+ if(!img)return;
+ const S=ddJellyState(img),conf=ddJellyCfg(),amp=conf.amp,scope=conf.scope;
+ img._ddJellyAbort?.abort();img._ddJellyAbort=null;
+ img.style.transform='';img.style.touchAction='';img.style.willChange='';
+ if(!conf.on){S.selecting=false;return;}
+ if(scope==='whole'&&!S.has&&!conf.shake&&!S.selecting)return ddAttachJellyWhole(img,conf);
+ let probeOk=false;
+ try{const pc=document.createElement('canvas');probeOk=!!(pc.getContext('webgl')||pc.getContext('experimental-webgl'));}catch{}
+ if(!probeOk)return ddAttachJellyWhole(img,conf);
+ const ac=new AbortController();img._ddJellyAbort=ac;const sig={signal:ac.signal};
+ const wantPointer=conf.tap||conf.drag||S.selecting;
+ if(wantPointer){img.draggable=false;img.style.touchAction='none';img.style.webkitUserDrag='none';}
+ const MW=DD_JELLY_MW,MH=DD_JELLY_MH;
+ let canvas=null,selCv=null,gl=null,prog=null,posBuf=null,idxCount=0,tex=null,texSrc='',cols=0,rows=0,pos=null,locPos=0,boxW=0,boxH=0,failed=false;
+ let raf=0,press=null,cx=0,cy=0,lx=0,ly=0,ofx=null,ofy=null,ovx=null,ovy=null,mv=null,shw=null,shown=false;
+ const dep={x:0,v:0,t:0,k:.3,d:.6},ox={x:0,v:0,t:0,k:.3,d:.7},oy={x:0,v:0,t:0,k:.3,d:.7};
+ const aff={x:[0,0,1,1,0],v:[0,0,0,0,0],t:[0,0,1,1,0]};
+ const shk={x:0,y:0,vx:0,vy:0};
+ const destroy=()=>{cancelAnimationFrame(raf);raf=0;try{canvas?.remove();}catch{}try{selCv?.remove();}catch{}canvas=null;selCv=null;gl=null;};
+ ac.signal.addEventListener('abort',destroy);
+ const box=()=>{
+  const r=img.getBoundingClientRect(),cs=getComputedStyle(img);
+  const f=n=>parseFloat(cs[n])||0;
+  const l=f('paddingLeft')+f('borderLeftWidth'),t=f('paddingTop')+f('borderTopWidth'),rr=f('paddingRight')+f('borderRightWidth'),b=f('paddingBottom')+f('borderBottomWidth');
+  return {left:l,top:t,w:Math.max(10,r.width-l-rr),h:Math.max(10,r.height-t-b)};
+ };
+ const compile=(type,src)=>{const sh=gl.createShader(type);gl.shaderSource(sh,src);gl.compileShader(sh);if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS))throw new Error('shader');return sh;};
+ // 选区采样（双线性），返回 0~1
+ const maskAt=(u,v)=>{
+  const gx=Math.max(0,Math.min(MW-1,u*(MW-1))),gy=Math.max(0,Math.min(MH-1,v*(MH-1)));
+  const x0=Math.floor(gx),y0=Math.floor(gy),x1=Math.min(MW-1,x0+1),y1=Math.min(MH-1,y0+1),fx=gx-x0,fy=gy-y0,m=S.mask;
+  return (m[y0*MW+x0]*(1-fx)+m[y0*MW+x1]*fx)*(1-fy)+(m[y1*MW+x0]*(1-fx)+m[y1*MW+x1]*fx)*fy;
+ };
+ const rebuildWeights=()=>{
+  if(!mv)return;
+  for(let j=0;j<=rows;j++)for(let i=0;i<=cols;i++){
+   const k=j*(cols+1)+i,u=i/cols,v=j/rows;
+   mv[k]=S.has?maskAt(u,v):1;
+   shw[k]=S.has?mv[k]:Math.pow(Math.sin(Math.PI*u),.6)*Math.pow(Math.sin(Math.PI*v),.6);
+  }
+ };
+ // 选区显示层：低分辨率画布放大，边缘自带柔化
+ let accent=null;
+ const accentRgb=()=>[255,64,129]; // 选区固定用醒目的玫红，不随主题变化，放在各种图上都看得清
+ const paintSel=()=>{
+  if(!selCv)return;
+  const x=selCv.getContext('2d'),id=x.createImageData(MW,MH),[r,g,b]=accentRgb();
+  for(let k=0;k<MW*MH;k++){id.data[k*4]=r;id.data[k*4+1]=g;id.data[k*4+2]=b;id.data[k*4+3]=Math.round(Math.min(1,S.mask[k])*175);}
+  x.putImageData(id,0,0);
+ };
+ const placeOverlays=bx=>{
+  const l=(img.offsetLeft+bx.left)+'px',t=(img.offsetTop+bx.top)+'px',w=bx.w+'px',h=bx.h+'px';
+  for(const c of [canvas,selCv]){if(!c)continue;c.style.left=l;c.style.top=t;c.style.width=w;c.style.height=h;}
+ };
+ const ensure=()=>{
+  if(failed)return false;
+  try{
+   const bx=box();
+   if(!canvas){
+    const host=img.offsetParent||img.parentElement;if(!host)throw new Error('no host');
+    canvas=document.createElement('canvas');canvas.className='dd-jelly-canvas';canvas.style.cssText='position:absolute;pointer-events:none;display:none;z-index:2;';
+    host.appendChild(canvas);
+    selCv=document.createElement('canvas');selCv.className='dd-jelly-sel';selCv.width=MW;selCv.height=MH;selCv.style.cssText='position:absolute;pointer-events:none;z-index:3;display:none;';
+    host.appendChild(selCv);
+    gl=canvas.getContext('webgl',{alpha:true,premultipliedAlpha:true,antialias:true})||canvas.getContext('experimental-webgl');
+    if(!gl)throw new Error('no gl');
+    prog=gl.createProgram();
+    gl.attachShader(prog,compile(gl.VERTEX_SHADER,'attribute vec2 aPos;attribute vec2 aUv;uniform vec2 uSize;varying vec2 vUv;void main(){vUv=aUv;gl_Position=vec4(aPos.x/uSize.x*2.0-1.0,1.0-aPos.y/uSize.y*2.0,0.0,1.0);}'));
+    gl.attachShader(prog,compile(gl.FRAGMENT_SHADER,'precision mediump float;uniform sampler2D uTex;varying vec2 vUv;void main(){gl_FragColor=texture2D(uTex,vUv);}'));
+    gl.linkProgram(prog);if(!gl.getProgramParameter(prog,gl.LINK_STATUS))throw new Error('link');
+    gl.useProgram(prog);
+    tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tex);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+    posBuf=gl.createBuffer();
+    locPos=gl.getAttribLocation(prog,'aPos');
+   }
+   const dpr=Math.min(2,window.devicePixelRatio||1);
+   if(Math.abs(bx.w-boxW)>.5||Math.abs(bx.h-boxH)>.5||!pos){
+    boxW=bx.w;boxH=bx.h;canvas.width=Math.round(bx.w*dpr);canvas.height=Math.round(bx.h*dpr);
+    cols=32;rows=Math.max(16,Math.min(56,Math.round(cols*bx.h/bx.w)));
+    const n=(cols+1)*(rows+1);pos=new Float32Array(n*2);const uvs=new Float32Array(n*2);
+    ofx=new Float32Array(n);ofy=new Float32Array(n);ovx=new Float32Array(n);ovy=new Float32Array(n);mv=new Float32Array(n);shw=new Float32Array(n);
+    const idx=[];
+    for(let j=0;j<=rows;j++)for(let i=0;i<=cols;i++){const k=j*(cols+1)+i;uvs[k*2]=i/cols;uvs[k*2+1]=j/rows;}
+    for(let j=0;j<rows;j++)for(let i=0;i<cols;i++){const a=j*(cols+1)+i,b=a+1,c=a+cols+1,d=c+1;idx.push(a,b,c,b,d,c);}
+    idxCount=idx.length;
+    const ib=gl.createBuffer();gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,ib);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(idx),gl.STATIC_DRAW);
+    const ub=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,ub);gl.bufferData(gl.ARRAY_BUFFER,uvs,gl.STATIC_DRAW);
+    const locUv=gl.getAttribLocation(prog,'aUv');gl.enableVertexAttribArray(locUv);gl.vertexAttribPointer(locUv,2,gl.FLOAT,false,0,0);
+    gl.viewport(0,0,canvas.width,canvas.height);
+    rebuildWeights();paintSel();
+   }
+   placeOverlays(bx);
+   if(texSrc!==(img.currentSrc||img.src)){
+    gl.bindTexture(gl.TEXTURE_2D,tex);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,img);
+    texSrc=img.currentSrc||img.src;
+   }
+   return true;
+  }catch(e){failed=true;destroy();console.warn('[小小桌宠] 局部互动不可用，改用整图弹动',e);return false;}
+ };
+ const draw=()=>{
+  const m=Math.min(boxW,boxH),feedback=Math.max(.5,Math.min(2.5,Number(ddCfg().feedbackRange||100)/100)),R=.17*m*feedback,R2=.22*m*feedback,RR=R*R,RR2=R2*R2,shAmp=.05*m*amp;
+  const useLocal=scope!=='whole',useAff=scope==='whole';
+  const [tx,ty,sx,sy,rot]=aff.x,cr=Math.cos(rot*Math.PI/180),sr=Math.sin(rot*Math.PI/180),mx0=boxW/2,my0=boxH/2;
+  const shOn=Math.abs(shk.x)>.0005||Math.abs(shk.y)>.0005;
+  for(let j=0;j<=rows;j++)for(let i=0;i<=cols;i++){
+   const k=j*(cols+1)+i,px=i/cols*boxW,py=j/rows*boxH,m1=mv[k];
+   let x=px,y=py;
+   if(useLocal){
+    const dx=px-cx,dy=py-cy,d2=dx*dx+dy*dy;
+    const w=Math.exp(-d2/RR)*m1,w2=Math.exp(-d2/RR2)*m1;
+    const f=1-dep.x*w;
+    x=cx+dx*f+ox.x*w2+ofx[k];y=cy+dy*f+oy.x*w2+ofy[k];
+   }
+   if(useAff){
+    const dxc=px-mx0,dyc=py-my0;
+    const X=mx0+tx+(dxc*cr-dyc*sr)*sx,Y=my0+ty+(dxc*sr+dyc*cr)*sy;
+    x=px+(X-px)*m1;y=py+(Y-py)*m1;
+   }
+   if(shOn){const w=shw[k];x+=shk.x*shAmp*w*(1+.6*(py/boxH-.5));y+=shk.y*shAmp*w*(1+.4*(px/boxW-.5));}
+   pos[k*2]=Math.max(0,Math.min(boxW,x));pos[k*2+1]=Math.max(0,Math.min(boxH,y));
+  }
+  gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.bindBuffer(gl.ARRAY_BUFFER,posBuf);gl.bufferData(gl.ARRAY_BUFFER,pos,gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(locPos);gl.vertexAttribPointer(locPos,2,gl.FLOAT,false,0,0);
+  gl.uniform2f(gl.getUniformLocation(prog,'uSize'),boxW,boxH);
+  gl.drawElements(gl.TRIANGLES,idxCount,gl.UNSIGNED_SHORT,0);
+ };
+ const step=s=>{s.v+=(s.t-s.x)*s.k;s.v*=s.d;s.x+=s.v;return Math.abs(s.v)>.002||Math.abs(s.t-s.x)>.002;};
+ const resetAll=()=>{
+  dep.x=dep.v=ox.x=ox.v=oy.x=oy.v=0;aff.x=[0,0,1,1,0];aff.v=[0,0,0,0,0];aff.t=[0,0,1,1,0];shk.x=shk.y=shk.vx=shk.vy=0;
+  if(ofx){ofx.fill(0);ofy.fill(0);ovx.fill(0);ovy.fill(0);}
+ };
+ const K=.16,D=.80;
+ const tick=()=>{
+  if(!canvas||!gl){raf=0;return;}
+  let live=false;
+  live=step(dep)||live;live=step(ox)||live;live=step(oy)||live;
+  for(let i=0;i<5;i++){
+   if(press&&!press.paint&&i<4&&scope==='whole'){aff.x[i]=aff.t[i];aff.v[i]=0;}
+   else{aff.v[i]+=(aff.t[i]-aff.x[i])*K;aff.v[i]*=D;aff.x[i]+=aff.v[i];}
+   if(Math.abs(aff.v[i])>.002||Math.abs(aff.t[i]-aff.x[i])>.002)live=true;
+  }
+  shk.vx+=-shk.x*.1;shk.vx*=.9;shk.x+=shk.vx;shk.vy+=-shk.y*.1;shk.vy*=.9;shk.y+=shk.vy;
+  if(Math.abs(shk.x)>.002||Math.abs(shk.vx)>.002||Math.abs(shk.y)>.002||Math.abs(shk.vy)>.002)live=true;
+  if(ofx){for(let k=0;k<ofx.length;k++){if(!press||!press.smudging){ovx[k]+=(0-ofx[k])*.12;ovy[k]+=(0-ofy[k])*.12;ovx[k]*=.8;ovy[k]*=.8;ofx[k]+=ovx[k];ofy[k]+=ovy[k];}if(Math.abs(ofx[k])>.02||Math.abs(ofy[k])>.02||Math.abs(ovx[k])>.01||Math.abs(ovy[k])>.01)live=true;}}
+  draw();
+  if(live||(press&&!press.paint))raf=requestAnimationFrame(tick);
+  else{raf=0;canvas.style.display='none';shown=false;resetAll();}
+ };
+ const show=()=>{if(canvas&&!shown){canvas.style.display='block';shown=true;}};
+ const kick=()=>{if(!raf)raf=requestAnimationFrame(tick);};
+ const local=e=>{const r=img.getBoundingClientRect(),bx=box();return [Math.max(0,Math.min(boxW,e.clientX-r.left-bx.left)),Math.max(0,Math.min(boxH,e.clientY-r.top-bx.top))];};
+ // 涂选区：自由手绘，高斯笔刷取最大值，边缘柔和
+ const paintAt=(x,y)=>{
+  const erase=S.tool==='erase',u=x/boxW,v=y/boxH,rad=ddJellyBrush()*Math.min(boxW,boxH),rr=rad*rad*1.3;
+  for(let j=0;j<MH;j++){const dy=(j/(MH-1)-v)*boxH;if(Math.abs(dy)>rad*2.2)continue;
+   for(let i=0;i<MW;i++){const dx=(i/(MW-1)-u)*boxW;if(Math.abs(dx)>rad*2.2)continue;
+    const w=Math.exp(-(dx*dx+dy*dy)/rr);{const q=j*MW+i;if(erase)S.mask[q]=Math.max(0,S.mask[q]-w*1.3);else if(w>S.mask[q])S.mask[q]=Math.min(1,w*1.15);}}}
+  if(erase){let any=false;for(let q=0;q<S.mask.length;q++){if(S.mask[q]<.04)S.mask[q]=0;else any=true;}S.has=any;}else S.has=true;
+  paintSel();rebuildWeights();ddPersistMask(img,S);
+ };
+ img.addEventListener('pointerdown',e=>{
+  if(e.pointerType==='mouse'&&e.button!==0)return;
+  if(!S.selecting&&!conf.tap&&!conf.drag)return;
+  if(!ensure()){if(failed)ddAttachJellyWhole(img,conf);return;}
+  const [px,py]=local(e);
+  try{img.setPointerCapture(e.pointerId);}catch{}
+  e.preventDefault();
+  if(S.selecting){
+   press={id:e.pointerId,paint:true};selCv.style.display='block';paintAt(px,py);return;
+  }
+  cx=px;cy=py;lx=px;ly=py;
+  press={id:e.pointerId,x:e.clientX,y:e.clientY,t:Date.now(),moved:false,smudging:false};
+  show();
+  Object.assign(dep,{k:.3,d:.6});Object.assign(ox,{k:.3,d:.7});Object.assign(oy,{k:.3,d:.7});
+  ox.t=ox.x=0;oy.t=oy.x=0;ox.v=oy.v=0;
+  if(scope!=='whole'&&conf.tap)dep.t=Math.min(.5,.3*amp);
+  kick();
+ },sig);
+ img.addEventListener('pointermove',e=>{
+  if(!press||e.pointerId!==press.id||!canvas)return;
+  if(press.paint){const [px,py]=local(e);paintAt(px,py);return;}
+  const dx=e.clientX-press.x,dy=e.clientY-press.y;
+  if(!press.moved&&Math.hypot(dx,dy)<6)return;
+  press.moved=true;press.dx=dx;
+  if(!conf.drag)return;
+  if(scope==='whole'){
+   const damp=v=>Math.sign(v)*Math.pow(Math.abs(v),.82)*.55;
+   const w=boxW,h=boxH,ax=Math.abs(dx)/w,ay=Math.abs(dy)/h;
+   const stX=Math.min(.38,ax*.9*amp),stY=Math.min(.38,ay*.9*amp);
+   aff.t[0]=damp(dx);aff.t[1]=damp(dy);aff.t[2]=(1+stX)*(1-stY*.45);aff.t[3]=(1+stY)*(1-stX*.45);aff.t[4]=Math.max(-6,Math.min(6,dx/w*5*amp));
+   kick();return;
+  }
+  dep.t=0;
+  if(scope==='smudge'){
+   // 抹开：手指划过的地方（笔刷半径内）的像素被带着走，松手后各点自己弹回原位。
+   const [nx,ny]=local(e);
+   const mx=nx-lx,my=ny-ly;lx=nx;ly=ny;cx=nx;cy=ny;press.smudging=true;
+   const Rb=.12*Math.min(boxW,boxH),RRb=Rb*Rb,lim=.12*Math.min(boxW,boxH)*amp;
+   for(let j=0;j<=rows;j++)for(let i=0;i<=cols;i++){
+    const k=j*(cols+1)+i,ddx=i/cols*boxW-nx,ddy=j/rows*boxH-ny,w=Math.exp(-(ddx*ddx+ddy*ddy)/RRb)*mv[k];
+    if(w<.02)continue;
+    ofx[k]=Math.max(-lim,Math.min(lim,ofx[k]+mx*w*.9));ofy[k]=Math.max(-lim,Math.min(lim,ofy[k]+my*w*.9));ovx[k]=0;ovy[k]=0;
+   }
+   kick();return;
+  }
+  const damp=v=>Math.sign(v)*Math.pow(Math.abs(v),.8)*.7*amp;
+  ox.t=damp(dx);oy.t=damp(dy);kick();
+ },sig);
+ const end=e=>{
+  if(!press||(e&&e.pointerId!==press.id))return;
+  const p=press;press=null;p.smudging=false;try{img.releasePointerCapture(p.id);}catch{}
+  if(p.paint){return;}
+  Object.assign(dep,{k:.15,d:.78});Object.assign(ox,{k:.13,d:.8});Object.assign(oy,{k:.13,d:.8});
+  dep.t=0;ox.t=0;oy.t=0;
+  if(scope==='whole'){
+   const quick=Date.now()-p.t<450&&!p.moved;
+   if(quick&&conf.tap){aff.x[2]=1+.11*amp;aff.x[3]=1-.14*amp;aff.v[2]=0;aff.v[3]=0;}
+   else if(p.moved&&conf.drag){aff.v[2]-=(aff.x[2]-1)*.35;aff.v[3]-=(aff.x[3]-1)*.35;}
+   aff.t=[0,0,1,1,0];
+  }
+  kick();
+ };
+ img.addEventListener('pointerup',end,sig);img.addEventListener('pointercancel',end,sig);
+ img.addEventListener('contextmenu',e=>{if(press)e.preventDefault();},sig);
+ if(S.selecting&&ensure()){selCv.style.display='block';paintSel();}
+ // 摇晃手机：加速度推着选区（没选区时是整张图、边缘不动）晃，停了弹簧自己回来。
+ if(conf.shake&&!S.selecting){
+  let gx=0,gy=0,primed=false;
+  window.addEventListener('devicemotion',e=>{
+   if(press)return;
+   let ax=0,ay=0;const a=e.acceleration;
+   if(a&&(a.x!=null||a.y!=null)){ax=a.x||0;ay=a.y||0;}
+   else{const g=e.accelerationIncludingGravity||{};const vx=g.x||0,vy=g.y||0;if(!primed){gx=vx;gy=vy;primed=true;}gx=gx*.9+vx*.1;gy=gy*.9+vy*.1;ax=vx-gx;ay=vy-gy;}
+   if(Math.abs(ax)+Math.abs(ay)<1.2)return;
+   if(!ensure())return;
+   show();
+   shk.vx+=Math.max(-1.2,Math.min(1.2,-ax*.025*amp));shk.vy+=Math.max(-1.2,Math.min(1.2,ay*.025*amp));
+   shk.x=Math.max(-1.6,Math.min(1.6,shk.x));shk.y=Math.max(-1.6,Math.min(1.6,shk.y));
+   kick();
+  },sig);
+ }
 }
-async function clearAsset(key) {
-    const db = await openAssetDB();
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction('assets', 'readwrite');
-        tx.objectStore('assets').delete(key);
-        tx.oncomplete = () => { db.close(); resolve(); };
-        tx.onerror = () => { db.close(); reject(tx.error || new Error('清除选区失败')); };
-    });
+function ddAttachJellyWhole(img,conf){
+ if(!img)return;
+ conf=conf||ddJellyCfg();const amp=conf.amp;
+ // 每次打开都按当前设置重新决定是否启用；上一次绑的监听用 AbortController 统一撤掉。
+ img._ddJellyAbort?.abort();img._ddJellyAbort=null;
+ img.style.transform='';img.style.touchAction='';img.style.transformOrigin='';
+ if(!conf.on||(!conf.tap&&!conf.drag))return;
+ const ac=new AbortController();img._ddJellyAbort=ac;const sig={signal:ac.signal};
+ img.draggable=false;img.style.touchAction='none';img.style.willChange='transform';img.style.webkitUserDrag='none';
+ // 状态：x=[tx,ty,sx,sy,rot]，v=速度，t=目标
+ const st={x:[0,0,1,1,0],v:[0,0,0,0,0],t:[0,0,1,1,0]};
+ let raf=0,drag=null;
+ const K=.16,D=.80;
+ const apply=()=>{img.style.transform='translate('+st.x[0].toFixed(2)+'px,'+st.x[1].toFixed(2)+'px) rotate('+st.x[4].toFixed(3)+'deg) scale('+st.x[2].toFixed(4)+','+st.x[3].toFixed(4)+')';};
+ const tick=()=>{
+  let moving=false;
+  for(let i=0;i<5;i++){
+   if(drag&&i<4){st.x[i]=st.t[i];st.v[i]=0;}
+   else{st.v[i]+=(st.t[i]-st.x[i])*K;st.v[i]*=D;st.x[i]+=st.v[i];}
+   if(Math.abs(st.v[i])>.0008||Math.abs(st.t[i]-st.x[i])>.0008)moving=true;
+  }
+  apply();
+  if(moving||drag)raf=requestAnimationFrame(tick);
+  else{raf=0;st.x=[0,0,1,1,0];st.v=[0,0,0,0,0];img.style.transform='';}
+ };
+ const kick=()=>{if(!raf)raf=requestAnimationFrame(tick);};
+ const rest=()=>{st.t=[0,0,1,1,0];};
+ const squish=()=>{st.x[2]=1+.11*amp;st.x[3]=1-.14*amp;st.v[2]=0;st.v[3]=0;rest();kick();};
+ img.addEventListener('pointerdown',e=>{
+  if(e.pointerType==='mouse'&&e.button!==0)return;
+  drag={id:e.pointerId,x:e.clientX,y:e.clientY,t:Date.now(),moved:false};
+  try{img.setPointerCapture(e.pointerId);}catch{}
+  e.preventDefault();
+ },sig);
+ img.addEventListener('pointermove',e=>{
+  if(!drag||e.pointerId!==drag.id)return;
+  const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
+  if(!drag.moved&&Math.hypot(dx,dy)<6)return;
+  drag.moved=true;
+  if(!conf.drag)return;
+  const w=img.clientWidth||300,h=img.clientHeight||300;
+  // 沿拖动方向拉伸、垂直方向收窄，图片中心跟着手指走一小段（橡皮筋式阻尼）。
+  const damp=v=>Math.sign(v)*Math.pow(Math.abs(v),.82)*.55;
+  const ax=Math.abs(dx)/w,ay=Math.abs(dy)/h;
+  const stretchX=Math.min(.38,ax*.9*amp),stretchY=Math.min(.38,ay*.9*amp);
+  st.t[0]=damp(dx);st.t[1]=damp(dy);
+  st.t[2]=(1+stretchX)*(1-stretchY*.45);st.t[3]=(1+stretchY)*(1-stretchX*.45);
+  st.t[4]=Math.max(-6,Math.min(6,dx/w*5*amp));
+  kick();
+ },sig);
+ const end=e=>{
+  if(!drag||(e&&e.pointerId!==drag.id))return;
+  const d=drag;drag=null;try{img.releasePointerCapture(d.id);}catch{}
+  const quick=Date.now()-d.t<450&&!d.moved;
+  if(quick&&conf.tap){squish();return;}
+  if(d.moved&&conf.drag){
+   // 松手：保留当前拉伸状态，并给一点反向速度，弹簧会带来 Q 弹的过冲。
+   st.v[2]-=(st.x[2]-1)*.35;st.v[3]-=(st.x[3]-1)*.35;rest();kick();return;
+  }
+  rest();kick();
+ };
+ img.addEventListener('pointerup',end,sig);img.addEventListener('pointercancel',end,sig);
+ img.addEventListener('contextmenu',e=>{if(drag)e.preventDefault();},sig);
 }
-async function clearPetImage() {
-    const db = await openAssetDB();
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction('assets', 'readwrite');
-        tx.objectStore('assets').delete('pet-image');
-        tx.oncomplete = () => { db.close(); resolve(); };
-        tx.onerror = () => { db.close(); reject(tx.error || new Error('删除图片失败')); };
-    });
+function ddBuildBar(overlay){
+
+   // 放大图下方的果冻面板：范围 / 选区 / 交互，不用回设置页。
+   const bar=document.createElement('div');bar.className='dd-jelly-bar';bar.setAttribute('role','group');bar.setAttribute('aria-label','果冻互动');
+   bar.innerHTML='<div class="dd-jb-head"><button type="button" data-jb="power"></button><button type="button" data-jb="more">设置 ▴</button><button type="button" data-jb-tool="add" aria-label="增加选区（画笔）" title="增加选区" hidden><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20l1-4L16.5 4.5a2 2 0 0 1 3 3L8 19z"/><path d="M14 7l3 3"/></svg></button><button type="button" data-jb-tool="erase" aria-label="擦除选区（橡皮）" title="擦除选区" hidden><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 20h12"/><path d="M5 15l8-8a2 2 0 0 1 3 0l3 3a2 2 0 0 1 0 3l-6 6H9z"/><path d="M9 11l6 6"/></svg></button><button type="button" data-jb="clr" aria-label="清除全部选区" title="清除全部选区" hidden><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg></button><button type="button" data-jb="done" aria-label="完成选区" title="完成" hidden><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg></button><label class="dd-jb-brush" hidden title="画笔粗细"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"/></svg><input type="range" min="2" max="20" step="1" data-jb-brush aria-label="画笔粗细"></label></div>'
+    +'<div class="dd-jb-panel" hidden><div class="dd-jb-row"><b>范围</b><button type="button" data-jb-scope="local">局部</button><button type="button" data-jb-scope="smudge">抹开</button><button type="button" data-jb-scope="whole">全屏</button></div>'
+    +'<div class="dd-jb-row"><b>选区</b><button type="button" data-jb="sel">✎ 涂选区</button><button type="button" data-jb="clr2">清除</button><em class="dd-jb-hint"></em></div>'
+    +'<div class="dd-jb-row"><b>反馈</b><label class="dd-jb-feedback"><input type="range" min="50" max="250" step="5" data-jb-feedback aria-label="反馈范围"><output data-jb-feedback-value>100%</output></label></div>'
+    +'<div class="dd-jb-row"><b>交互</b><button type="button" data-jb-in="drag">拖动</button><button type="button" data-jb-in="shake">摇晃</button>'
+    +'<span class="dd-jb-dd"><button type="button" class="dd-jb-dd-btn" data-jb-dd aria-haspopup="listbox" aria-expanded="false"><span data-jb-dd-label>Q弹</span> ▾</button><span class="dd-jb-dd-list" role="listbox" hidden><button type="button" role="option" data-jb-strength="soft">软糯</button><button type="button" role="option" data-jb-strength="mid">Q弹</button><button type="button" role="option" data-jb-strength="bouncy">DUANG</button></span></span></div>'
+    +'<div class="dd-jb-msg" role="status"></div></div>';
+   const $b=sel=>bar.querySelector(sel);
+   const setMsg=t=>{$b('.dd-jb-msg').textContent=t||'';};
+   const feedbackInput=$b('[data-jb-feedback]');if(feedbackInput){feedbackInput.value=String(ddCfg().feedbackRange||100);$b('[data-jb-feedback-value]').textContent=feedbackInput.value+'%';}
+   const paintBar=()=>{
+    const c=ddJellyCfg(),img=overlay.querySelector('img'),S=img?ddJellyState(img):{has:false,selecting:false};
+    $b('[data-jb=power]').textContent=c.on?'果冻：开':'果冻：关';$b('[data-jb=power]').classList.toggle('is-active',c.on);
+    bar.classList.toggle('is-off',!c.on);bar.classList.toggle('is-selecting',!!S.selecting);
+    bar.querySelectorAll('[data-jb-scope]').forEach(b=>b.classList.toggle('is-active',b.dataset.jbScope===c.scope));
+    const ins={tap:c.tap,drag:c.drag,shake:c.shake};const stv=['soft','bouncy'].includes(ddCfg().jellyStrength)?ddCfg().jellyStrength:'mid';bar.querySelectorAll('[data-jb-strength]').forEach(b=>b.classList.toggle('is-active',b.dataset.jbStrength===stv));{const lab=$b('[data-jb-dd-label]');if(lab)lab.textContent={soft:'软糯',mid:'Q弹',bouncy:'DUANG'}[stv];}bar.querySelectorAll('[data-jb-in]').forEach(b=>b.classList.toggle('is-active',!!ins[b.dataset.jbIn]));
+    $b('[data-jb=sel]').classList.toggle('is-active',!!S.selecting);
+    $b('.dd-jb-hint').textContent=S.has?'已选区（只有选中的地方会动）':'未选区（整张图都会动）';
+    $b('.dd-jb-brush').hidden=!S.selecting;bar.querySelectorAll('[data-jb-tool]').forEach(t=>{t.hidden=!S.selecting;t.classList.toggle('is-active',(S.tool||'add')===t.dataset.jbTool);});$b('[data-jb=power]').hidden=!!S.selecting;{const bi=$b('[data-jb-brush]');if(bi&&document.activeElement!==bi)bi.value=String(Math.round(ddJellyBrush()*100));}
+    $b('[data-jb=done]').hidden=!S.selecting;$b('[data-jb=clr]').hidden=!S.selecting;$b('[data-jb=more]').hidden=!!S.selecting;
+    if(S.selecting)$b('.dd-jb-panel').hidden=true;
+    $b('[data-jb=more]').textContent=$b('.dd-jb-panel').hidden?'设置 ▴':'收起 ▾';
+   };
+   const syncSettings=()=>{const sel=document.querySelector('#dd-strength');if(sel)sel.value=['soft','bouncy'].includes(ddCfg().jellyStrength)?ddCfg().jellyStrength:'mid';};
+   const rebind=()=>{ddAttachJelly(overlay.querySelector('img'));paintBar();syncSettings();};
+   bar.addEventListener('input',e=>{
+    const fi=e.target.closest('[data-jb-feedback]');if(fi){ddCfg().feedbackRange=Number(fi.value);ddSave();$b('[data-jb-feedback-value]').textContent=fi.value+'%';const img=overlay.querySelector('img');if(img)ddAttachJelly(img);return;}
+    const bi=e.target.closest('[data-jb-brush]');if(!bi)return;e.stopPropagation();
+    ddCfg().jellyBrush=Number(bi.value)/100;ddSave();
+    // 临时画一个圈让你看到当前粗细
+    const img=overlay.querySelector('img'),host=img.offsetParent||img.parentElement;if(!host)return;
+    let ring=host.querySelector('.dd-jb-ring');if(!ring){ring=document.createElement('div');ring.className='dd-jb-ring';host.appendChild(ring);}
+    const d=2.2*ddJellyBrush()*Math.min(img.clientWidth,img.clientHeight);
+    ring.style.cssText='position:absolute;pointer-events:none;z-index:4;border-radius:50%;border:2px solid #ff4081;background:rgba(255,64,129,.25);width:'+d+'px;height:'+d+'px;left:'+(img.offsetLeft+img.clientWidth/2-d/2)+'px;top:'+(img.offsetTop+img.clientHeight/2-d/2)+'px';
+    clearTimeout(ring._t);ring._t=setTimeout(()=>ring.remove(),800);
+   });
+   bar.addEventListener('click',async e=>{
+    const b=e.target.closest('button');if(!b)return;e.preventDefault();e.stopPropagation();
+    const c=ddCfg(),img=overlay.querySelector('img'),S=ddJellyState(img),d=b.dataset;
+    if(d.jb==='power'){ddJellyCfg();c.jellyOn=!c.jellyOn;if(!c.jellyOn)S.selecting=false;ddSave();rebind();return;}
+    if(d.jb==='more'){const p=$b('.dd-jb-panel');p.hidden=!p.hidden;paintBar();return;}
+    if(d.jb==='sel'){ddJellyCfg();if(!c.jellyOn){c.jellyOn=true;ddSave();}S.selecting=true;S.tool='add';rebind();return;}
+    if(d.jbTool){S.tool=d.jbTool;paintBar();return;}
+    if(d.jb==='done'){S.selecting=false;rebind();return;}
+    if(d.jb==='clr'||d.jb==='clr2'){ddJellyClearSelection(img);ddPersistMask(img,S);if(d.jb==='clr')S.selecting=true;rebind();return;}
+    if(d.jbScope){ddJellyCfg();c.jellyScope=d.jbScope;c.jellyOn=true;ddSave();rebind();return;}
+    if(d.jbDd!==undefined){const l=$b('.dd-jb-dd-list'),p=$b('.dd-jb-panel');l.hidden=!l.hidden;p.classList.toggle('is-dd-open',!l.hidden);b.setAttribute('aria-expanded',String(!l.hidden));return;}
+    if(d.jbStrength){c.jellyStrength=d.jbStrength;ddSave();{const l=$b('.dd-jb-dd-list'),p=$b('.dd-jb-panel');l.hidden=true;p.classList.remove('is-dd-open');$b('[data-jb-dd]').setAttribute('aria-expanded','false');}rebind();return;}
+    if(d.jbIn){
+     ddJellyCfg();const key={tap:'jellyTap',drag:'jellyDrag',shake:'jellyShake'}[d.jbIn];c[key]=!c[key];if(c[key])c.jellyOn=true;ddSave();
+     if(d.jbIn==='shake'&&c.jellyShake){setMsg('');await ddJellyEnableMotion(setMsg);}
+     else if(d.jbIn==='shake')setMsg('');
+     rebind();
+    }
+   });
+   overlay._ddPaintBar=paintBar;overlay._ddMsg=setMsg;overlay.append(bar);
+  
+ return overlay.querySelector('.dd-jelly-bar');
 }
 
-const BALL = '<svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lp-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f8c9d9"/><stop offset="1" stop-color="#d78eae"/></linearGradient></defs><path d="M32 5c-15 0-26 11-26 26 0 14 11 27 26 27s26-13 26-27C58 16 47 5 32 5Z" fill="url(#lp-g)"/><path d="M18 25c2-5 7-8 13-8" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" opacity=".8"/><circle cx="23" cy="34" r="2.7" fill="#765565"/><circle cx="41" cy="34" r="2.7" fill="#765565"/><path d="M28 42q4 4 8 0" fill="none" stroke="#765565" stroke-width="2.4" stroke-linecap="round"/></svg>';
+// ===== 放大弹窗 =====
 
-let maskMode = 'paint';
-let maskStroke = null;
-let pet = { maskCanvas: null, maskCtx: null, maskOverlay: null, maskOverlayCtx: null, maskPixels: null, image: null, url: '', gl: null, program: null, texture: null, positionBuffer: null, uvBuffer: null, indexBuffer: null, cols: 36, rows: 36, positions: null, uvs: null, indices: null, indexCount: 0, width: 0, height: 0, raf: 0, pointer: null, cx: 0, cy: 0, pullX: 0, pullY: 0, vx: 0, vy: 0 };
-
-function shader(gl, type, source) {
-    const s = gl.createShader(type);
-    gl.shaderSource(s, source);
-    gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) || '着色器编译失败');
-    return s;
+const DB_NAME='little-pet-assets';
+function openAssetDB(){return new Promise((resolve,reject)=>{const req=indexedDB.open(DB_NAME,1);req.onupgradeneeded=()=>req.result.createObjectStore('assets');req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});}
+async function dbGet(key){const db=await openAssetDB();return new Promise((resolve,reject)=>{const tx=db.transaction('assets','readonly'),r=tx.objectStore('assets').get(key);r.onsuccess=()=>{db.close();resolve(r.result||null);};r.onerror=()=>{db.close();reject(r.error);};});}
+async function dbPut(key,value){const db=await openAssetDB();return new Promise((resolve,reject)=>{const tx=db.transaction('assets','readwrite');tx.objectStore('assets').put(value,key);tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};});}
+async function dbDelete(key){const db=await openAssetDB();return new Promise((resolve,reject)=>{const tx=db.transaction('assets','readwrite');tx.objectStore('assets').delete(key);tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};});}
+let maskSaveTimer=0;
+function ddPersistMask(img,S){if(!img||!S)return;clearTimeout(maskSaveTimer);maskSaveTimer=setTimeout(()=>{dbPut('pet-mask',{mask:Array.from(S.mask),has:S.has}).catch(e=>console.warn('[小小桌宠] 选区保存失败',e));},180);}
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const BALL='<svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lp-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f8c9d9"/><stop offset="1" stop-color="#d78eae"/></linearGradient></defs><path d="M32 5c-15 0-26 11-26 26 0 14 11 27 26 27s26-13 26-27C58 16 47 5 32 5Z" fill="url(#lp-g)"/><path d="M18 25c2-5 7-8 13-8" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" opacity=".8"/><circle cx="23" cy="34" r="2.7" fill="#765565"/><circle cx="41" cy="34" r="2.7" fill="#765565"/><path d="M28 42q4 4 8 0" fill="none" stroke="#765565" stroke-width="2.4" stroke-linecap="round"/></svg>';
+let petUrl='',petRoot=null,petImage=null;
+function saveCfg(){try{saveSettingsDebounced();}catch{}}
+function placeBall(){const b=document.querySelector('#lp-ball');if(!b)return;const c=ddCfg();b.style.left=(c.ballX?'calc(100vw - '+(b.offsetWidth+8)+'px)':'8px');b.style.top=(clamp(Number(c.ballY),0,1)*Math.max(0,innerHeight-b.offsetHeight))+'px';}
+function toast(t){const el=document.querySelector('#lp-toast');if(!el)return;el.textContent=t;el.classList.add('is-visible');clearTimeout(el._timer);el._timer=setTimeout(()=>el.classList.remove('is-visible'),2100);}
+function detachPet(){if(petImage)petImage._ddJellyAbort?.abort();petRoot?.remove();petRoot=null;petImage=null;}
+function restoreMask(img){return dbGet('pet-mask').then(saved=>{const S=ddJellyState(img);if(saved&&Array.isArray(saved.mask)&&saved.mask.length===S.mask.length){S.mask.set(saved.mask);S.has=!!saved.has;}else{S.mask.fill(0);S.has=false;}ddAttachJelly(img);});}
+function makePetRoot(url){const root=document.createElement('div');root.className='lp-interaction';root.innerHTML='<div class="lp-image-host"><img alt="小小桌宠" draggable="false"></div>';const img=root.querySelector('img');img.src=url;return {root,img};}
+async function setPetImage(blob){
+ if(!blob)return;detachPet();await dbPut('pet-image',blob);if(petUrl)URL.revokeObjectURL(petUrl);petUrl=URL.createObjectURL(blob);
+ const made=makePetRoot(petUrl);petRoot=made.root;petImage=made.img;const stage=document.querySelector('#lp-stage');stage.replaceChildren(petRoot);
+ await new Promise((resolve,reject)=>{petImage.onload=resolve;petImage.onerror=()=>reject(new Error('图片载入失败'));});
+ ddBuildBar(petRoot);await restoreMask(petImage);document.querySelector('#lp-empty').hidden=true;
 }
-function initGL(canvas) {
-    const gl = canvas.getContext('webgl', { alpha: true, premultipliedAlpha: true, antialias: true })
-        || canvas.getContext('experimental-webgl');
-    if (!gl) throw new Error('当前浏览器没有可用的 WebGL');
-    const p = gl.createProgram();
-    gl.attachShader(p, shader(gl, gl.VERTEX_SHADER, 'attribute vec2 aPosition; attribute vec2 aUv; uniform vec2 uSize; varying vec2 vUv; void main(){ vUv=aUv; gl_Position=vec4(aPosition.x/uSize.x*2.0-1.0, 1.0-aPosition.y/uSize.y*2.0, 0.0, 1.0); }'));
-    gl.attachShader(p, shader(gl, gl.FRAGMENT_SHADER, 'precision mediump float; uniform sampler2D uTexture; varying vec2 vUv; void main(){ gl_FragColor=texture2D(uTexture,vUv); }'));
-    gl.linkProgram(p);
-    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p) || '着色器链接失败');
-    gl.useProgram(p);
-    const texture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    return { gl, program: p, texture, positionBuffer: gl.createBuffer(), uvBuffer: gl.createBuffer(), indexBuffer: gl.createBuffer() };
+function mount(){
+ if(document.querySelector('#little-pet-root'))return;
+ const root=document.createElement('div');root.id='little-pet-root';
+ root.innerHTML='<button id="lp-ball" class="lp-ball" type="button" aria-label="打开小小桌宠">'+BALL+'</button><section id="lp-panel" class="lp-panel" aria-hidden="true"><header class="lp-header"><div><b>小小桌宠</b><small>摸摸它，看看会不会 DUANG</small></div><button class="lp-close" type="button">×</button></header><div id="lp-stage" class="lp-stage"><div id="lp-empty" class="lp-empty"><b>放一张图片进来</b><small>支持 PNG、WebP、JPG，建议透明背景立绘</small><button id="lp-upload" type="button">选择图片</button></div></div><div class="lp-toolbar"><label>更换图片<input id="lp-file" type="file" accept="image/png,image/webp,image/jpeg"></label><button id="lp-reset" type="button">恢复互动状态</button><button id="lp-remove" type="button">移除图片</button></div><div id="lp-toast" role="status"></div></section>';
+ document.body.append(root);
+ const panel=root.querySelector('#lp-panel'),ball=root.querySelector('#lp-ball');
+ const open=()=>{panel.classList.add('is-open');panel.setAttribute('aria-hidden','false');ball.classList.add('is-active');};
+ const close=()=>{panel.classList.remove('is-open');panel.setAttribute('aria-hidden','true');ball.classList.remove('is-active');};
+ ball.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse'&&e.button!==0)return;const r=ball.getBoundingClientRect();ball._drag={id:e.pointerId,dx:e.clientX-r.left,dy:e.clientY-r.top,sx:e.clientX,sy:e.clientY,moved:false};ball.setPointerCapture(e.pointerId);});
+ ball.addEventListener('pointermove',e=>{const d=ball._drag;if(!d||d.id!==e.pointerId)return;if(!d.moved&&Math.hypot(e.clientX-d.sx,e.clientY-d.sy)<6)return;d.moved=true;ball.style.left=clamp(e.clientX-d.dx,0,innerWidth-ball.offsetWidth)+'px';ball.style.top=clamp(e.clientY-d.dy,0,innerHeight-ball.offsetHeight)+'px';});
+ const end=e=>{const d=ball._drag;if(!d||d.id!==e.pointerId)return;ball._drag=null;if(d.moved){const r=ball.getBoundingClientRect();ddCfg().ballX=r.left+r.width/2>innerWidth/2?1:0;ddCfg().ballY=clamp(r.top/Math.max(1,innerHeight-ball.offsetHeight),0,1);saveCfg();}else panel.classList.contains('is-open')?close():open();};
+ ball.addEventListener('pointerup',end);ball.addEventListener('pointercancel',end);
+ root.querySelector('.lp-close').addEventListener('click',close);
+ root.querySelector('#lp-upload').addEventListener('click',()=>root.querySelector('#lp-file').click());
+ root.querySelector('#lp-file').addEventListener('change',async e=>{const f=e.target.files?.[0];e.target.value='';if(!f)return;try{await setPetImage(f);toast('图片已保存');}catch(err){toast(err.message||'图片载入失败');}});
+ root.querySelector('#lp-reset').addEventListener('click',()=>{if(!petImage)return;petImage._ddJellyAbort?.abort();ddJellyClearSelection(petImage);ddPersistMask(petImage,ddJellyState(petImage));ddAttachJelly(petImage);toast('互动状态已复位');});
+ root.querySelector('#lp-remove').addEventListener('click',async()=>{detachPet();await dbDelete('pet-image');await dbDelete('pet-mask');const stage=root.querySelector('#lp-stage');stage.replaceChildren(root.querySelector('#lp-empty'));root.querySelector('#lp-empty').hidden=false;toast('图片已移除');});
+ placeBall();window.addEventListener('resize',placeBall);
+ dbGet('pet-image').then(blob=>{if(blob)setPetImage(blob).catch(e=>toast(e.message));}).catch(e=>console.warn('[小小桌宠] 恢复图片失败',e));
 }
-function buildMesh(width, height) {
-    const cols = 36, rows = clamp(Math.round(cols * height / width), 18, 64);
-    const positions = new Float32Array((cols + 1) * (rows + 1) * 2);
-    const uvs = new Float32Array(positions.length), indices = [];
-    for (let y = 0; y <= rows; y++) for (let x = 0; x <= cols; x++) {
-        const k = y * (cols + 1) + x;
-        uvs[k * 2] = x / cols; uvs[k * 2 + 1] = y / rows;
-    }
-    for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
-        const a = y * (cols + 1) + x, b = a + 1, c = a + cols + 1, d = c + 1;
-        indices.push(a, b, c, b, d, c);
-    }
-    return { cols, rows, positions, uvs, indices: new Uint16Array(indices) };
-}
-function uploadTexture() {
-    const gl = pet.gl;
-    if (!gl || !pet.image) return;
-    gl.bindTexture(gl.TEXTURE_2D, pet.texture);
-    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, pet.image);
-}
-function prepareCanvas() {
-    const canvas = document.querySelector('#lp-pet-canvas');
-    if (!canvas || !pet.image) return false;
-    // 保留原图像素尺寸，超出视口的部分在舞台内部滚动查看。
-    const scale = 1;
-    const w = Math.max(1, Math.round(pet.image.naturalWidth * scale));
-    const h = Math.max(1, Math.round(pet.image.naturalHeight * scale));
-    canvas.style.width = w + 'px'; canvas.style.height = h + 'px'; canvas.style.display = 'block';
-    const wrap = document.querySelector('#lp-canvas-wrap');
-    if (wrap) { wrap.style.width = w + 'px'; wrap.style.height = h + 'px'; }
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
-    pet.width = w; pet.height = h;
-    if (!pet.gl) Object.assign(pet, initGL(canvas));
-    const mesh = buildMesh(w, h);
-    pet.cols = mesh.cols; pet.rows = mesh.rows;
-    pet.positions = mesh.positions; pet.uvs = mesh.uvs; pet.indices = mesh.indices;
-    pet.indexCount = mesh.indices.length;
-    const gl = pet.gl;
-    gl.bindBuffer(gl.ARRAY_BUFFER, pet.uvBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, pet.uvs, gl.STATIC_DRAW);
-    const uvLoc = gl.getAttribLocation(pet.program, 'aUv');
-    gl.enableVertexAttribArray(uvLoc); gl.vertexAttribPointer(uvLoc, 2, gl.FLOAT, false, 0, 0);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, pet.indexBuffer);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, pet.indices, gl.STATIC_DRAW);
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    uploadTexture(); drawPet();
-    return true;
-}
-function drawPet() {
-    const gl = pet.gl;
-    if (!gl || !pet.positions) return;
-    const c = cfg();
-    const brushRadius = Math.max(12, Math.min(pet.width, pet.height) * Number(c.brush) / 100);
-    // 反馈范围独立于选区笔刷，按 duang 原版局部高斯反馈半径调节。
-    const feedbackScale = clamp(Number(c.feedback) / 100, .5, 2.5);
-    const feedbackRadius = Math.max(8, Math.min(pet.width, pet.height) * .17 * feedbackScale);
-    const radius2 = feedbackRadius * feedbackRadius;
-    const softness = clamp(Number(c.softness) / 100, .25, 1);
-    const displacement = Math.hypot(pet.pullX, pet.pullY);
-    for (let y = 0; y <= pet.rows; y++) for (let x = 0; x <= pet.cols; x++) {
-        const k = y * (pet.cols + 1) + x;
-        const px = x / pet.cols * pet.width, py = y / pet.rows * pet.height;
-        const dx = px - pet.cx, dy = py - pet.cy, d2 = dx * dx + dy * dy;
-        const maskWeight = maskAtUv(x / pet.cols, y / pet.rows);
-        const weight = Math.exp(-d2 / (radius2 * softness)) * maskWeight;
-        const edge = Math.exp(-d2 / (radius2 * 1.67)) * maskWeight;
-        const squeeze = Math.min(.34, displacement / Math.max(brushRadius, 1) * .34) * weight;
-        pet.positions[k * 2] = clamp(px + pet.pullX * weight - dx * squeeze * .42 + pet.pullX * edge * .12, 0, pet.width);
-        pet.positions[k * 2 + 1] = clamp(py + pet.pullY * weight - dy * squeeze * .42 + pet.pullY * edge * .12, 0, pet.height);
-    }
-    gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); gl.useProgram(pet.program);
-    gl.bindBuffer(gl.ARRAY_BUFFER, pet.positionBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, pet.positions, gl.DYNAMIC_DRAW);
-    const posLoc = gl.getAttribLocation(pet.program, 'aPosition');
-    gl.enableVertexAttribArray(posLoc); gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
-    gl.bindBuffer(gl.ARRAY_BUFFER, pet.uvBuffer);
-    const uvLoc = gl.getAttribLocation(pet.program, 'aUv');
-    gl.enableVertexAttribArray(uvLoc); gl.vertexAttribPointer(uvLoc, 2, gl.FLOAT, false, 0, 0);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, pet.indexBuffer);
-    gl.uniform2f(gl.getUniformLocation(pet.program, 'uSize'), pet.width, pet.height);
-    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, pet.texture);
-    gl.uniform1i(gl.getUniformLocation(pet.program, 'uTexture'), 0);
-    gl.drawElements(gl.TRIANGLES, pet.indexCount, gl.UNSIGNED_SHORT, 0);
-}
-function stopFrame() { if (pet.raf) cancelAnimationFrame(pet.raf); pet.raf = 0; }
-function animate() {
-    pet.raf = 0;
-    if (pet.pointer) {
-        drawPet();
-        return;
-    }
-    pet.vx += -pet.pullX * .16; pet.vy += -pet.pullY * .16;
-    pet.vx *= .78; pet.vy *= .78;
-    pet.pullX += pet.vx; pet.pullY += pet.vy;
-    drawPet();
-    const moving = Math.abs(pet.pullX) + Math.abs(pet.pullY) + Math.abs(pet.vx) + Math.abs(pet.vy) > .12;
-    if (moving || pet.pointer) pet.raf = requestAnimationFrame(animate);
-    else { pet.pullX = pet.pullY = pet.vx = pet.vy = 0; drawPet(); }
-}
-function wake() { if (!pet.raf) pet.raf = requestAnimationFrame(animate); }
-function applyMotionShake() {
-    const c = cfg();
-    if (!c.shake || !pet.image || !pet.maskPixels) return;
-    if (typeof DeviceMotionEvent === 'undefined') return toast('当前浏览器不支持摇晃感应');
-    const attach = () => {
-        if (pet.motionHandler) return;
-        pet.motionHandler = e => {
-            if (pet.pointer) return;
-            let ax = 0, ay = 0;
-            const a = e.acceleration;
-            if (a && (a.x != null || a.y != null)) { ax = a.x || 0; ay = a.y || 0; }
-            else { const g = e.accelerationIncludingGravity || {}; ax = g.x || 0; ay = g.y || 0; }
-            if (Math.abs(ax) + Math.abs(ay) < 1.2) return;
-            const amp = clamp(Number(cfg().strength) / 72, .25, 1.7);
-            const unit = Math.min(pet.width, pet.height) * .05 * amp;
-            pet.cx = pet.width / 2; pet.cy = pet.height / 2;
-            pet.vx += clamp(-ax * .025, -.12, .12) * unit;
-            pet.vy += clamp(ay * .025, -.12, .12) * unit;
-            wake();
-        };
-        window.addEventListener('devicemotion', pet.motionHandler);
-        toast('摇晃互动已开启，晃动设备试试');
-    };
-    const permission = DeviceMotionEvent.requestPermission;
-    if (typeof permission === 'function') permission.call(DeviceMotionEvent).then(result => {
-        if (result === 'granted') attach();
-        else { cfg().shake = false; save(); syncShakeButton(); toast('没有获得动作传感器权限'); }
-    }).catch(() => { cfg().shake = false; save(); syncShakeButton(); toast('请求动作传感器权限失败'); });
-    else attach();
-}
-function syncShakeButton() {
-    const button = document.querySelector('#lp-shake-toggle');
-    if (!button) return;
-    button.textContent = cfg().shake ? '关闭摇晃互动' : '开启摇晃互动';
-    button.classList.toggle('is-active', !!cfg().shake);
-}
-function pointerPosition(e) {
-    const r = e.currentTarget.getBoundingClientRect();
-    return [clamp(e.clientX - r.left, 0, r.width), clamp(e.clientY - r.top, 0, r.height)];
-}
-function bindPetTouch() {
-    const canvas = document.querySelector('#lp-pet-canvas');
-    if (!canvas || canvas.dataset.bound) return;
-    canvas.dataset.bound = '1';
-    canvas.addEventListener('pointerdown', e => {
-        if (e.pointerType === 'mouse' && e.button !== 0) return;
-        const [x, y] = pointerPosition(e);
-        if (maskAtPoint(x, y) < .12) return;
-        pet.pointer = { id: e.pointerId, startX: x, startY: y };
-        pet.cx = x; pet.cy = y;
-        try { canvas.setPointerCapture(e.pointerId); } catch {}
-        e.preventDefault(); wake();
-    });
-    canvas.addEventListener('pointermove', e => {
-        if (!pet.pointer || pet.pointer.id !== e.pointerId) return;
-        const [x, y] = pointerPosition(e), p = pet.pointer;
-        pet.cx = x; pet.cy = y;
-        const radius = Math.max(12, Math.min(pet.width, pet.height) * Number(cfg().brush) / 100);
-        const limit = radius * .82 * Number(cfg().strength) / 72;
-        const damp = v => Math.sign(v) * Math.pow(Math.abs(v), .88);
-        pet.pullX = clamp(damp(x - p.startX) * .72, -limit, limit);
-        pet.pullY = clamp(damp(y - p.startY) * .72, -limit, limit);
-        wake(); e.preventDefault();
-    });
-    const release = e => {
-        if (!pet.pointer || (e && e.pointerId !== pet.pointer.id)) return;
-        try { canvas.releasePointerCapture(pet.pointer.id); } catch {}
-        pet.pointer = null; wake();
-    };
-    canvas.addEventListener('pointerup', release);
-    canvas.addEventListener('pointercancel', release);
-    canvas.addEventListener('lostpointercapture', release);
-}
-function prepareMaskOverlay() {
-    const overlay = document.querySelector('#lp-mask-overlay');
-    const canvas = document.querySelector('#lp-pet-canvas');
-    if (!overlay || !canvas || !pet.image) return;
-    overlay.width = canvas.width; overlay.height = canvas.height;
-    overlay.style.width = canvas.style.width; overlay.style.height = canvas.style.height;
-    overlay.style.display = 'block';
-    pet.maskOverlay = overlay; pet.maskOverlayCtx = overlay.getContext('2d');
-    paintMaskOverlay();
-}
-function refreshMaskPixels() {
-    if (!pet.maskCtx || !pet.maskCanvas) { pet.maskPixels = null; return; }
-    pet.maskPixels = pet.maskCtx.getImageData(0, 0, pet.maskCanvas.width, pet.maskCanvas.height);
-}
-function maskAtUv(u, v) {
-    if (!pet.maskPixels || !pet.maskCanvas) return 0;
-    const x = clamp(Math.round(u * (pet.maskCanvas.width - 1)), 0, pet.maskCanvas.width - 1);
-    const y = clamp(Math.round(v * (pet.maskCanvas.height - 1)), 0, pet.maskCanvas.height - 1);
-    return pet.maskPixels.data[(y * pet.maskCanvas.width + x) * 4 + 3] / 255;
-}
-function maskAtPoint(x, y) {
-    if (!pet.width || !pet.height) return 0;
-    return maskAtUv(x / pet.width, y / pet.height);
-}
-function paintMaskOverlay() {
-    if (!pet.maskOverlayCtx || !pet.maskCanvas) return;
-    const ctx = pet.maskOverlayCtx, canvas = pet.maskOverlay;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(pet.maskCanvas, 0, 0, canvas.width, canvas.height);
-    ctx.globalCompositeOperation = 'source-in';
-    ctx.fillStyle = 'rgba(238, 139, 183, .48)';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.globalCompositeOperation = 'source-over';
-}
-async function savePetMask() {
-    if (!pet.maskCanvas) return;
-    const blob = await new Promise(resolve => pet.maskCanvas.toBlob(resolve, 'image/png'));
-    if (blob) await putAsset('pet-mask', blob);
-}
-async function loadPetMask() {
-    if (!pet.image) return;
-    pet.maskCanvas = document.createElement('canvas');
-    pet.maskCanvas.width = pet.image.naturalWidth;
-    pet.maskCanvas.height = pet.image.naturalHeight;
-    pet.maskCtx = pet.maskCanvas.getContext('2d', { willReadFrequently: true });
-    const saved = await getAsset('pet-mask');
-    if (saved) {
-        const url = URL.createObjectURL(saved);
-        try {
-            const bitmap = await createImageBitmap(saved);
-            pet.maskCtx.drawImage(bitmap, 0, 0, pet.maskCanvas.width, pet.maskCanvas.height);
-            bitmap.close?.();
-        } finally {}
-    }
-    refreshMaskPixels();
-    prepareMaskOverlay();
-    drawPet();
-}
-function bindMaskEditor() {
-    const overlay = document.querySelector('#lp-mask-overlay');
-    if (!overlay || overlay.dataset.bound) return;
-    overlay.dataset.bound = '1';
-    const point = e => {
-        const r = overlay.getBoundingClientRect();
-        return [(e.clientX - r.left) / r.width * pet.maskCanvas.width, (e.clientY - r.top) / r.height * pet.maskCanvas.height];
-    };
-    const stroke = (x, y) => {
-        if (!pet.maskCtx) return;
-        const size = Number(document.querySelector('#lp-mask-brush')?.value || 32);
-        const rect = overlay.getBoundingClientRect();
-        const radius = Math.max(2, size * pet.maskCanvas.width / Math.max(1, rect.width));
-        const g = pet.maskCtx.createRadialGradient(x, y, 0, x, y, radius);
-        g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(.68, 'rgba(255,255,255,.82)'); g.addColorStop(1, 'rgba(255,255,255,0)');
-        pet.maskCtx.save();
-        pet.maskCtx.globalCompositeOperation = maskMode === 'erase' ? 'destination-out' : 'source-over';
-        pet.maskCtx.fillStyle = g;
-        pet.maskCtx.beginPath(); pet.maskCtx.arc(x, y, radius, 0, Math.PI * 2); pet.maskCtx.fill();
-        pet.maskCtx.restore();
-        paintMaskOverlay();
-    };
-    overlay.addEventListener('pointerdown', e => {
-        if (!maskMode || !pet.maskCanvas) return;
-        maskStroke = { id: e.pointerId };
-        try { overlay.setPointerCapture(e.pointerId); } catch {}
-        const [x, y] = point(e); stroke(x, y); e.preventDefault();
-    });
-    overlay.addEventListener('pointermove', e => {
-        if (!maskStroke || maskStroke.id !== e.pointerId) return;
-        const [x, y] = point(e); stroke(x, y); e.preventDefault();
-    });
-    const end = async e => {
-        if (!maskStroke || (e && e.pointerId !== maskStroke.id)) return;
-        maskStroke = null;
-        refreshMaskPixels(); paintMaskOverlay(); drawPet();
-        try { await savePetMask(); } catch (err) { toast(err.message || '选区保存失败'); }
-    };
-    overlay.addEventListener('pointerup', end);
-    overlay.addEventListener('pointercancel', end);
-    overlay.addEventListener('lostpointercapture', end);
-}
-function setImage(blob) {
-    return new Promise((resolve, reject) => {
-        const url = URL.createObjectURL(blob), img = new Image();
-        img.onload = async () => {
-            if (pet.url) URL.revokeObjectURL(pet.url);
-            pet.url = url; pet.image = img;
-            try {
-                prepareCanvas(); bindPetTouch();
-                await loadPetMask();
-                resolve();
-            } catch (err) { reject(err); }
-        };
-        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('图片读取失败，请使用 PNG、JPG 或 WebP')); };
-        img.src = url;
-    });
-}
-function toast(message) {
-    const el = document.querySelector('#lp-toast');
-    if (!el) return;
-    el.textContent = message; el.classList.add('is-visible');
-    clearTimeout(el._timer);
-    el._timer = setTimeout(() => el.classList.remove('is-visible'), 2200);
-}
-function placeBall() {
-    const ball = document.querySelector('#lp-ball');
-    if (!ball) return;
-    const c = cfg(), w = ball.offsetWidth || 54, h = ball.offsetHeight || 54;
-    ball.style.left = clamp(c.ballX * (innerWidth - w), 0, innerWidth - w) + 'px';
-    ball.style.top = clamp(c.ballY * (innerHeight - h), 0, innerHeight - h) + 'px';
-}
-function mount() {
-    if (document.querySelector('#little-pet-root')) return;
-    const root = document.createElement('div');
-    root.id = 'little-pet-root';
-    root.innerHTML = '<button id="lp-ball" type="button" aria-label="打开小小桌宠" title="小小桌宠">' + BALL + '</button>' +
-      '<section id="lp-panel" class="lp-panel" aria-hidden="true">' +
-        '<header class="lp-header"><div><b>小小桌宠</b><small>摸摸它，看看会不会 DUANG</small></div><button class="lp-close" type="button" aria-label="关闭">×</button></header>' +
-        '<div class="lp-stage" id="lp-stage"><div class="lp-empty" id="lp-empty"><span class="lp-empty-mark">＋</span><b>放一张 PNG 进来</b><small>建议使用透明背景的角色立绘</small><button id="lp-upload" type="button">选择图片</button></div><div id="lp-canvas-wrap"><canvas id="lp-pet-canvas" aria-label="触摸并拖动桌宠"></canvas><canvas id="lp-mask-overlay" aria-label="涂抹互动选区"></canvas></div></div>' +
-        '<div class="lp-toolbar"><label class="lp-file-label">更换图片<input id="lp-file" type="file" accept="image/png,image/webp,image/jpeg"></label><button id="lp-reset" type="button">恢复形变</button><button id="lp-remove" type="button">移除图片</button></div>' +
-        '<div class="lp-mask-tools"><span>互动选区</span><button id="lp-mask-paint" type="button" class="is-active">涂抹选区</button><button id="lp-mask-erase" type="button">擦除选区</button><button id="lp-mask-clear" type="button">清空选区</button><button id="lp-mask-preview" type="button">互动预览</button><button id="lp-mask-release" type="button">放出桌宠</button><label>选区笔刷 <input id="lp-mask-brush" type="range" min="8" max="100" value="32"><output id="lp-mask-brush-value">32</output></label></div>' +
-        '<div class="lp-controls"><button id="lp-shake-toggle" type="button">开启摇晃互动</button>' +
-          '<label><span>拖动幅度 <output id="lp-brush-value"></output></span><input id="lp-brush" type="range" min="10" max="45" step="1"></label>' +
-          '<label><span>摇晃强度 <output id="lp-strength-value"></output></span><input id="lp-strength" type="range" min="25" max="120" step="1"></label>' +
-          '<label><span>边缘柔和 <output id="lp-softness-value"></output></span><input id="lp-softness" type="range" min="30" max="100" step="1"></label>' +
-          '<label><span>反馈范围 <output id="lp-feedback-value"></output></span><input id="lp-feedback" type="range" min="50" max="250" step="5"></label>' +
-          '<p>先涂抹角色上允许互动的区域，再切换到互动预览。只有选区内可以拖动，选区外不会形变。</p></div><div id="lp-toast" role="status" aria-live="polite"></div></section>';
-    document.body.append(root);
-    const panel = root.querySelector('#lp-panel'), ball = root.querySelector('#lp-ball');
-    const open = () => { panel.classList.add('is-open'); panel.setAttribute('aria-hidden', 'false'); ball.classList.add('is-active'); };
-    const close = () => { panel.classList.remove('is-open'); panel.setAttribute('aria-hidden', 'true'); ball.classList.remove('is-active'); };
-    ball.addEventListener('pointerdown', e => {
-        if (e.pointerType === 'mouse' && e.button !== 0) return;
-        const r = ball.getBoundingClientRect();
-        ball._drag = { id: e.pointerId, dx: e.clientX - r.left, dy: e.clientY - r.top, sx: e.clientX, sy: e.clientY, moved: false };
-        try { ball.setPointerCapture(e.pointerId); } catch {}
-    });
-    ball.addEventListener('pointermove', e => {
-        const d = ball._drag;
-        if (!d || d.id !== e.pointerId) return;
-        if (!d.moved && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 6) return;
-        d.moved = true;
-        ball.style.left = clamp(e.clientX - d.dx, 0, innerWidth - ball.offsetWidth) + 'px';
-        ball.style.top = clamp(e.clientY - d.dy, 0, innerHeight - ball.offsetHeight) + 'px';
-    });
-    const ballEnd = e => {
-        const d = ball._drag;
-        if (!d || d.id !== e.pointerId) return;
-        ball._drag = null;
-        try { ball.releasePointerCapture(d.id); } catch {}
-        if (d.moved) {
-            const r = ball.getBoundingClientRect(), c = cfg();
-            c.ballX = r.left + r.width / 2 > innerWidth / 2 ? 1 : 0;
-            c.ballY = clamp(r.top / Math.max(1, innerHeight - ball.offsetHeight), 0, 1);
-            save(); placeBall();
-        } else if (panel.classList.contains('is-open')) close(); else open();
-    };
-    ball.addEventListener('pointerup', ballEnd); ball.addEventListener('pointercancel', ballEnd);
-    root.querySelector('.lp-close').addEventListener('click', close);
-    root.querySelector('#lp-upload').addEventListener('click', () => root.querySelector('#lp-file').click());
-    const collapsePet = () => {
-        const floating = root.querySelector('#lp-float');
-        const canvas = root.querySelector('#lp-pet-canvas');
-        const overlay = root.querySelector('#lp-mask-overlay');
-        if (!floating || !canvas) return;
-        root.querySelector('#lp-canvas-wrap').append(canvas);
-        floating.remove();
-    };
-    const setMaskMode = mode => {
-        if (mode && root.querySelector('#lp-float')) collapsePet();
-        maskMode = mode;
-        root.querySelector('#lp-mask-paint').classList.toggle('is-active', mode === 'paint');
-        root.querySelector('#lp-mask-erase').classList.toggle('is-active', mode === 'erase');
-        root.querySelector('#lp-mask-preview').classList.toggle('is-active', mode === null);
-        const overlay = root.querySelector('#lp-mask-overlay');
-        if (overlay) overlay.style.pointerEvents = mode ? 'auto' : 'none';
-        toast(mode === 'paint' ? '涂抹要允许互动的区域' : mode === 'erase' ? '擦除不需要互动的区域' : '互动预览已开启');
-    };
-    root.querySelector('#lp-mask-paint').addEventListener('click', () => setMaskMode('paint'));
-    root.querySelector('#lp-mask-erase').addEventListener('click', () => setMaskMode('erase'));
-    root.querySelector('#lp-mask-preview').addEventListener('click', () => setMaskMode(null));
-    root.querySelector('#lp-mask-release').addEventListener('click', () => {
-        if (!pet.image) return toast('请先选择桌宠图片');
-        if (!pet.maskPixels || !pet.maskPixels.data.some((v, i) => i % 4 === 3 && v > 24)) return toast('先涂抹至少一块互动选区');
-        setMaskMode(null);
-        if (root.querySelector('#lp-float')) return;
-        const floating = document.createElement('div');
-        floating.id = 'lp-float';
-        floating.innerHTML = '<div class="lp-float-handle"><span>小小桌宠</span><button type="button" aria-label="收起桌宠">收起</button></div>';
-        floating.append(root.querySelector('#lp-pet-canvas'));
-        root.append(floating);
-        const c = cfg();
-        const place = () => {
-            const w = floating.offsetWidth || pet.width, h = floating.offsetHeight || pet.height + 30;
-            floating.style.left = clamp(Number(c.petFloatX ?? .72) * Math.max(0, innerWidth - w), 0, Math.max(0, innerWidth - w)) + 'px';
-            floating.style.top = clamp(Number(c.petFloatY ?? .68) * Math.max(0, innerHeight - h), 0, Math.max(0, innerHeight - h)) + 'px';
-        };
-        floating.querySelector('button').addEventListener('click', () => {
-            const canvas = root.querySelector('#lp-pet-canvas');
-            root.querySelector('#lp-canvas-wrap').append(canvas);
-            floating.remove();
-            setMaskMode('paint');
-        });
-        const handle = floating.querySelector('.lp-float-handle');
-        let drag = null;
-        handle.addEventListener('pointerdown', e => {
-            if (e.target.closest('button')) return;
-            const r = floating.getBoundingClientRect();
-            drag = { id:e.pointerId, dx:e.clientX-r.left, dy:e.clientY-r.top };
-            try { handle.setPointerCapture(e.pointerId); } catch {}
-        });
-        handle.addEventListener('pointermove', e => {
-            if (!drag || drag.id !== e.pointerId) return;
-            floating.style.left = clamp(e.clientX-drag.dx, 0, innerWidth-floating.offsetWidth) + 'px';
-            floating.style.top = clamp(e.clientY-drag.dy, 0, innerHeight-floating.offsetHeight) + 'px';
-        });
-        const end = e => {
-            if (!drag || drag.id !== e.pointerId) return;
-            drag = null;
-            const r = floating.getBoundingClientRect();
-            c.petFloatX = r.left / Math.max(1, innerWidth-floating.offsetWidth);
-            c.petFloatY = r.top / Math.max(1, innerHeight-floating.offsetHeight);
-            save();
-        };
-        handle.addEventListener('pointerup', end);
-        handle.addEventListener('pointercancel', end);
-        place();
-        window.addEventListener('resize', place);
-        toast('桌宠已放出，可以直接触摸选区互动');
-    });
-    root.querySelector('#lp-mask-clear').addEventListener('click', async () => {
-        if (!pet.maskCtx) return;
-        pet.maskCtx.clearRect(0, 0, pet.maskCanvas.width, pet.maskCanvas.height);
-        refreshMaskPixels(); paintMaskOverlay(); await savePetMask(); drawPet(); toast('互动选区已清空');
-    });
-    const maskBrush = root.querySelector('#lp-mask-brush');
-    maskBrush.addEventListener('input', () => { root.querySelector('#lp-mask-brush-value').value = maskBrush.value; });
-    bindMaskEditor();
-    root.querySelector('#lp-file').addEventListener('change', async e => {
-        const file = e.target.files && e.target.files[0]; e.target.value = '';
-        if (!file) return;
-        if (!file.type.startsWith('image/')) return toast('请选择图片文件');
-        try {
-            await putPetImage(file); await setImage(file);
-            root.querySelector('#lp-empty').hidden = true; toast('桌宠图片已保存');
-        } catch (err) { toast(err.message || '图片载入失败'); }
-    });
-    root.querySelector('#lp-reset').addEventListener('click', async () => {
-        try { const blob = await getPetImage(); if (blob) { await setImage(blob); toast('形变已复位'); } }
-        catch (err) { toast(err.message); }
-    });
-    root.querySelector('#lp-remove').addEventListener('click', async () => {
-        collapsePet();
-        await clearPetImage(); await clearAsset('pet-mask'); stopFrame(); pet.pointer = null; pet.image = null;
-        pet.maskCanvas = pet.maskCtx = pet.maskPixels = null;
-        if (pet.url) URL.revokeObjectURL(pet.url); pet.url = '';
-        if (pet.motionHandler) window.removeEventListener('devicemotion', pet.motionHandler); pet.motionHandler = null;
-        const canvas = root.querySelector('#lp-pet-canvas');
-        canvas.width = 1; canvas.height = 1; canvas.style.width = '0'; canvas.style.height = '0'; canvas.style.display = 'none';
-        root.querySelector('#lp-empty').hidden = false; toast('已移除桌宠图片');
-    });
-    root.querySelector('#lp-shake-toggle').addEventListener('click', () => {
-        cfg().shake = !cfg().shake; save(); syncShakeButton();
-        if (cfg().shake) applyMotionShake();
-        else { if (pet.motionHandler) window.removeEventListener('devicemotion', pet.motionHandler); pet.motionHandler = null; toast('摇晃互动已关闭'); }
-    });
-    if (cfg().shake) { cfg().shake = false; save(); } // 传感器权限必须由用户主动点击重新授权。
-    syncShakeButton();
-    for (const key of ['brush', 'strength', 'softness', 'feedback']) {
-        const input = root.querySelector('#lp-' + key), output = root.querySelector('#lp-' + key + '-value');
-        input.value = cfg()[key]; output.value = cfg()[key] + '%';
-        input.addEventListener('input', () => {
-            cfg()[key] = Number(input.value); output.value = input.value + '%'; save();
-            if (pet.image) drawPet();
-        });
-    }
-    placeBall();
-    window.addEventListener('resize', () => { placeBall(); if (pet.image) prepareCanvas(); });
-    getPetImage().then(blob => {
-        if (blob) setImage(blob).then(() => { root.querySelector('#lp-empty').hidden = true; setMaskMode('paint'); })
-            .catch(err => toast(err.message || '上次的桌宠图片载入失败'));
-    }).catch(err => console.warn('[小小桌宠] 本地图片仓库不可用', err));
-}
-function init() {
-    if (window.__littlePetReady) return;
-    window.__littlePetReady = true;
-    mount();
-}
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
-else init();
+function init(){if(window.__littlePetReady)return;window.__littlePetReady=true;mount();}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
