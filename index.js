@@ -135,9 +135,9 @@ function uploadTexture() {
 function prepareCanvas() {
     const canvas = document.querySelector('#lp-pet-canvas');
     if (!canvas || !pet.image) return false;
-    const maxW = Math.min(window.innerWidth * .82, 520);
-    const maxH = Math.min(window.innerHeight * .52, 520);
-    const scale = Math.min(maxW / pet.image.naturalWidth, maxH / pet.image.naturalHeight, 1);
+    const maxW = Math.min(window.innerWidth * .88, 560);
+    // 仅按可用宽度等比缩放，不限制高度；舞台和面板随原图比例自然展开。
+    const scale = Math.min(maxW / pet.image.naturalWidth, 1);
     const w = Math.max(1, Math.round(pet.image.naturalWidth * scale));
     const h = Math.max(1, Math.round(pet.image.naturalHeight * scale));
     canvas.style.width = w + 'px'; canvas.style.height = h + 'px'; canvas.style.display = 'block';
