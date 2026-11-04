@@ -147,6 +147,8 @@ function ddAttachJelly(img){
    placeOverlays(bx);
    if(texSrc!==(img.currentSrc||img.src)){
     gl.bindTexture(gl.TEXTURE_2D,tex);
+    // PNG 透明边缘先做预乘 Alpha，避免 WebGL 线性采样把透明像素的白色 RGB 混进轮廓。
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL,true);
     gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,img);
     texSrc=img.currentSrc||img.src;
    }
