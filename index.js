@@ -93,7 +93,8 @@ function ddAttachJelly(img){
    const k=j*(cols+1)+i,u=i/cols,v=j/rows;
    if(iconMode){
     // Duang 图标模式：底部比例完全固定，上方区域可形变；过渡只发生在固定线以上。
-    const t=Math.max(0,Math.min(1,(boundary-v)/band)),w=t*t*(3-2*t);
+    // 与原版 ddBallHtml 的上下双图层一致：固定线以上整体变换，以下完全静止，不做渐变权重。
+    const w=v<=boundary?1:0;
     mv[k]=w;shw[k]=w;
    }else{
     mv[k]=S.has?maskAt(u,v):1;
@@ -215,12 +216,15 @@ function ddAttachJelly(img){
     if(ddCfg().interactionMode==='icon'){
      // 复刻 Duang 原版：底层保持原位，上层以底边中点为轴 skewX + scaleY。
      const fixed=Math.max(0,Math.min(70,Number(ddCfg().fixedBottom??26)||0))/100,pivotY=boxH*(1-fixed),w=mv[k];
-     if(w>0){const dx=x-boxW/2,dy=y-pivotY,rad=(-iconWobble.r)*Math.PI/180,cs=Math.cos(rad),sn=Math.sin(rad),sx=1-iconWobble.s*.5,sy=1+iconWobble.s;
-      const skewX=Math.tan(rad);const tx=dx*sx+dy*skewX,ty=dy*sy;
-      x=boxW/2+(dx+(tx-dx)*w);y=pivotY+(dy+(ty-dy)*w);
+     if(w>0){const dx=x-boxW/2,dy=y-pivotY,rad=(-iconWobble.r)*Math.PI/180,sx=1-iconWobble.s*.5,sy=1+iconWobble.s;
+      // CSS: skewX(angle) scale(sx, sy)，按原版变换矩阵顺序计算。
+      const tx=dx*sx+Math.tan(rad)*dy*sy,ty=dy*sy;
+      x=boxW/2+(tx-dx)*w+dx;y=pivotY+(ty-dy)*w+dy;
      }
     }else if(shOn){const q=shw[k];x+=shk.x*shAmp*q*(1+.6*(py/boxH-.5));y+=shk.y*shAmp*q*(1+.4*(px/boxW-.5));}
-    pos[k*2]=Math.max(0,Math.min(boxW,x));pos[k*2+1]=Math.max(0,Math.min(boxH,y));
+    // 原版上层允许越过固定线；只由 WebGL 画布边界裁切，不把顶点提前钳回图片矩形。
+    const iconMode=ddCfg().interactionMode==='icon';
+    pos[k*2]=iconMode?x:Math.max(0,Math.min(boxW,x));pos[k*2+1]=iconMode?y:Math.max(0,Math.min(boxH,y));
    }
    gl.bufferSubData(gl.ARRAY_BUFFER,0,pos);
   }
