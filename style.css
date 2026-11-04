@@ -21,7 +21,7 @@ body > #lp-panel.is-open{display:flex;opacity:1;transform:translate3d(-50%,-50%,
 #lp-float{position:fixed;z-index:2147481800;max-width:calc(100vw - 16px);max-height:calc(100dvh - 16px);overflow:auto;padding:7px;border:1px solid var(--lp-border);border-radius:14px;background:var(--lp-panel);box-shadow:0 8px 28px #0005}.lp-float-handle{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:3px 4px 7px;font-size:11px;color:var(--lp-muted);touch-action:none;cursor:grab;user-select:none}.lp-float-handle button{border:1px solid var(--lp-border);border-radius:7px;padding:3px 9px;background:transparent;color:var(--lp-text);font-size:10px}#lp-float .lp-image-host img{max-width:78vw;max-height:60dvh}
 
 /* 浮窗等比缩放：四角拖动，内容随窗口统一缩放 */
-#lp-float{box-sizing:border-box;min-width:180px;min-height:150px;overflow:hidden;touch-action:pan-x pan-y}
+#lp-float{box-sizing:border-box;min-width:0;min-height:0;overflow:hidden;touch-action:pan-x pan-y}
 #lp-float .lp-float-content{position:relative;display:flex;align-items:center;justify-content:center;transform-origin:top left;overflow:hidden}
 #lp-float .lp-float-content>.lp-interaction{flex:none;transform-origin:center center}
 #lp-float .lp-float-resize{position:absolute;z-index:20;width:22px;height:22px;touch-action:none}
