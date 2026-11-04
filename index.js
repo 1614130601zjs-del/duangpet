@@ -562,8 +562,8 @@ function mount(){
   if(menu.querySelector('#little_pet_wand'))return true;
   const container=document.createElement('div');container.id='little_pet_wand_container';container.className='extension_container';
   const item=document.createElement('div');item.id='little_pet_wand';item.className='list-group-item flex-container flexGap5';
-  const icon=document.createElement('div');icon.className='extensionsMenuExtensionButton';icon.innerHTML='<svg viewBox="0 0 24 24" width="1em" height="1em" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M12.2 2.2c.7 3.2-1.2 4.7-2.5 6.5-1.1 1.5-1.7 2.8-1.5 4.3.2 1.4 1.2 2.4 2.5 2.7-.4-1.8.5-3.1 1.8-4.3.2 2 2.4 2.8 2.4 5.1 0 1.2-.7 2.2-1.8 2.7 3.5-.2 6-2.8 6-6.2 0-4.2-3.4-7.4-6.9-10.8Z" fill="#ff8a35"/><path d="M10.2 14.8c-1.5 1.2-2.3 2.5-2.3 4.1 0 2 1.7 3.6 4.1 3.6s4.1-1.6 4.1-3.7c0-1.3-.6-2.4-1.8-3.4-.1 1.5-1 2.4-2.1 2.8.2-1.3-.4-2.4-2-3.4Z" fill="#ffd166"/></svg>';
-  item.append(icon,document.createTextNode('摇起来'));
+  const icon=document.createElement('div');icon.className='extensionsMenuExtensionButton';icon.style.cssText='flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;';icon.innerHTML='<svg style="display:block;flex:none;overflow:visible" viewBox="0 0 24 24" width="1.2em" height="1.2em" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path d="M12.2 2.2c.7 3.2-1.2 4.7-2.5 6.5-1.1 1.5-1.7 2.8-1.5 4.3.2 1.4 1.2 2.4 2.5 2.7-.4-1.8.5-3.1 1.8-4.3.2 2 2.4 2.8 2.4 5.1 0 1.2-.7 2.2-1.8 2.7 3.5-.2 6-2.8 6-6.2 0-4.2-3.4-7.4-6.9-10.8Z" fill="#ff8a35"/><path d="M10.2 14.8c-1.5 1.2-2.3 2.5-2.3 4.1 0 2 1.7 3.6 4.1 3.6s4.1-1.6 4.1-3.7c0-1.3-.6-2.4-1.8-3.4-.1 1.5-1 2.4-2.1 2.8.2-1.3-.4-2.4-2-3.4Z" fill="#ffd166"/></svg>';
+  item.append(icon,document.createTextNode('火🚫热'));
   item.addEventListener('click',()=>panel.classList.contains('is-open')?close():open());
   container.append(item);menu.append(container);return true;
  };
