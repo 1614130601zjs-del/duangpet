@@ -34,3 +34,5 @@ body > #lp-panel.is-open{display:flex;opacity:1;transform:translate3d(-50%,-50%,
 #lp-float .lp-resize-ne:after{right:5px;top:5px}
 #lp-float .lp-resize-sw:after{left:5px;bottom:5px}
 #lp-float .lp-resize-se:after{right:5px;bottom:5px}
+/* 保留四角拖动热区与缩放逻辑，只隐藏角上的可见方框 */
+#lp-float .lp-float-resize:after{display:none}
