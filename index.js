@@ -316,7 +316,7 @@ function bindMaskEditor() {
         const rect = overlay.getBoundingClientRect();
         const radius = Math.max(2, size * pet.maskCanvas.width / Math.max(1, rect.width));
         const g = pet.maskCtx.createRadialGradient(x, y, 0, x, y, radius);
-        g.addColorStop(0, 1); g.addColorStop(.68, .82); g.addColorStop(1, 0);
+        g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(.68, 'rgba(255,255,255,.82)'); g.addColorStop(1, 'rgba(255,255,255,0)');
         pet.maskCtx.save();
         pet.maskCtx.globalCompositeOperation = maskMode === 'erase' ? 'destination-out' : 'source-over';
         pet.maskCtx.fillStyle = g;
