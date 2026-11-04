@@ -258,6 +258,7 @@ function ddAttachJelly(img){
   if(S.selecting){
    press={id:e.pointerId,paint:true};selCv.style.display='block';paintAt(px,py);return;
   }
+  if(scope==='local'&&activeRanges.length)restoreActiveMesh();
   cx=px;cy=py;lx=px;ly=py;if(scope==='local')buildLocalInfluence();
   press={id:e.pointerId,x:e.clientX,y:e.clientY,t:Date.now(),moved:false,smudging:false};
   show();
