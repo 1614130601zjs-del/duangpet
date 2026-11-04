@@ -479,22 +479,76 @@ async function dbDelete(key){const db=await openAssetDB();return new Promise((re
 let maskSaveTimer=0;
 function ddPersistMask(img,S){if(!img||!S)return;clearTimeout(maskSaveTimer);maskSaveTimer=setTimeout(()=>{dbPut('pet-mask',{mask:Array.from(S.mask),has:S.has}).catch(e=>console.warn('[小小桌宠] 选区保存失败',e));},180);}
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-let petUrl='',petRoot=null,petImage=null,petFloat=null,petFloatState=null;
+let petUrl='',petRoot=null,petImage=null,petFloat=null,petFloatState=null,petBlob=null,petEraser=null,petEraserHistory=[];
 function saveCfg(){try{saveSettingsDebounced();}catch{}}
 function toast(t){const el=document.querySelector('#lp-toast');if(!el)return;el.textContent=t;el.classList.add('is-visible');clearTimeout(el._timer);el._timer=setTimeout(()=>el.classList.remove('is-visible'),2100);}
 function detachPet(){if(petImage)petImage._ddJellyAbort?.abort();if(petFloat)petFloat.remove();petFloat=null;petFloatState=null;petRoot?.remove();petRoot=null;petImage=null;}
 function restoreMask(img){return dbGet('pet-mask').then(saved=>{const S=ddJellyState(img);if(saved&&Array.isArray(saved.mask)&&saved.mask.length===S.mask.length){S.mask.set(saved.mask);S.has=!!saved.has;}else{S.mask.fill(0);S.has=false;}ddAttachJelly(img);});}
 function makePetRoot(url){const root=document.createElement('div');root.className='lp-interaction';root.innerHTML='<div class="lp-image-host"><img alt="小小桌宠" draggable="false"></div>';const img=root.querySelector('img');img.src=url;return {root,img};}
 async function setPetImage(blob){
- if(!blob)return;detachPet();await dbPut('pet-image',blob);if(petUrl)URL.revokeObjectURL(petUrl);petUrl=URL.createObjectURL(blob);
+ if(!blob)return;if(petEraser)await ddSetEraser(false);detachPet();petBlob=blob;petEraserHistory=[];await dbPut('pet-image',blob);if(petUrl)URL.revokeObjectURL(petUrl);petUrl=URL.createObjectURL(blob);
  const made=makePetRoot(petUrl);petRoot=made.root;petImage=made.img;const stage=document.querySelector('#lp-stage');stage.replaceChildren(petRoot);
  await new Promise((resolve,reject)=>{petImage.onload=resolve;petImage.onerror=()=>reject(new Error('图片载入失败'));});
  ddBuildBar(petRoot,document.querySelector('#lp-jelly-slot'));petRoot._ddPaintBar?.();await restoreMask(petImage);petImage._ddJellyPrepare?.();petRoot._ddPaintBar?.();document.querySelector('#lp-empty').hidden=true;
 }
+
+function canvasToBlob(canvas){return new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('PNG 保存失败')),'image/png'));}
+function ddEraserPoint(canvas,e){const r=canvas.getBoundingClientRect();return {x:(e.clientX-r.left)/Math.max(1,r.width)*canvas.width,y:(e.clientY-r.top)/Math.max(1,r.height)*canvas.height};}
+function ddEraserStamp(ctx,x,y,canvas){
+ const radius=Math.max(1,Math.min(canvas.width,canvas.height)*Number(document.querySelector('#lp-eraser-size')?.value||7)/200);
+ const softness=Number(document.querySelector('#lp-eraser-soft')?.value??65);
+ ctx.save();ctx.globalCompositeOperation='destination-out';
+ if(softness<=0){ctx.beginPath();ctx.arc(x,y,radius,0,Math.PI*2);ctx.fill();}
+ else{const inner=radius*(1-softness/100),g=ctx.createRadialGradient(x,y,inner,x,y,radius);g.addColorStop(0,'rgba(0,0,0,1)');g.addColorStop(1,'rgba(0,0,0,0)');ctx.fillStyle=g;ctx.beginPath();ctx.arc(x,y,radius,0,Math.PI*2);ctx.fill();}
+ ctx.restore();
+}
+function ddEraserLine(ctx,a,b,canvas){const radius=Math.max(1,Math.min(canvas.width,canvas.height)*Number(document.querySelector('#lp-eraser-size')?.value||7)/200),dist=Math.hypot(b.x-a.x,b.y-a.y),steps=Math.max(1,Math.ceil(dist/Math.max(1,radius*.22)));for(let i=1;i<=steps;i++){const t=i/steps;ddEraserStamp(ctx,a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t,canvas);}}
+async function ddSetEraser(enabled){
+ const tools=document.querySelector('#lp-eraser-tools'),toggle=document.querySelector('#lp-eraser-toggle');
+ if(!petImage)return;
+ if(!enabled){
+  if(!petEraser)return;
+  const state=petEraser;petEraser=null;state.canvas.remove();petImage.style.visibility=state.visibility||'';
+  if(petBlob){if(petUrl)URL.revokeObjectURL(petUrl);petUrl=URL.createObjectURL(petBlob);petImage.src=petUrl;await new Promise(resolve=>{if(petImage.complete)resolve();else{petImage.onload=resolve;petImage.onerror=resolve;}});}
+  tools.hidden=true;toggle?.classList.remove('is-active');toggle?.setAttribute('aria-pressed','false');
+  ddAttachJelly(petImage);petImage._ddJellyPrepare?.();petRoot?._ddPaintBar?.();return;
+ }
+ if(petEraser||petFloat)return;
+ const img=petImage,host=img.parentElement;if(!host)return;
+ img._ddJellyAbort?.abort();
+ const canvas=document.createElement('canvas');canvas.className='lp-eraser-canvas';canvas.width=img.naturalWidth;canvas.height=img.naturalHeight;
+ canvas.style.left=img.offsetLeft+'px';canvas.style.top=img.offsetTop+'px';canvas.style.width=img.offsetWidth+'px';canvas.style.height=img.offsetHeight+'px';
+ const ctx=canvas.getContext('2d',{willReadFrequently:false});ctx.drawImage(img,0,0);
+ const state={canvas,ctx,visibility:img.style.visibility,active:null};petEraser=state;host.append(canvas);img.style.visibility='hidden';
+ const finishStroke=async stroke=>{
+  if(!stroke||!stroke.ready)return;
+  const blob=await canvasToBlob(canvas);
+  petEraserHistory.push(stroke.before);if(petEraserHistory.length>8)petEraserHistory.shift();
+  petBlob=blob;await dbPut('pet-image',blob);
+  const undo=document.querySelector('#lp-eraser-undo');if(undo)undo.disabled=!petEraserHistory.length;
+ };
+ canvas.addEventListener('pointerdown',async e=>{
+  if(e.pointerType==='mouse'&&e.button!==0)return;e.preventDefault();if(state.active)return;
+  try{canvas.setPointerCapture(e.pointerId);}catch{}
+  const stroke={id:e.pointerId,ready:false,points:[ddEraserPoint(canvas,e)],before:null,pendingEnd:false};state.active=stroke;
+  try{stroke.before=await canvasToBlob(canvas);stroke.ready=true;for(let i=1;i<stroke.points.length;i++)ddEraserLine(ctx,stroke.points[i-1],stroke.points[i],canvas);ddEraserStamp(ctx,stroke.points[0].x,stroke.points[0].y,canvas);if(stroke.pendingEnd){state.active=null;await finishStroke(stroke);}}
+  catch(err){state.active=null;toast(err.message||'橡皮擦初始化失败');}
+ });
+ canvas.addEventListener('pointermove',e=>{
+  const stroke=state.active;if(!stroke||stroke.id!==e.pointerId)return;e.preventDefault();const p=ddEraserPoint(canvas,e);stroke.points.push(p);if(stroke.ready){const n=stroke.points.length;ddEraserLine(ctx,stroke.points[n-2],p,canvas);}
+ });
+ const end=async e=>{const stroke=state.active;if(!stroke||stroke.id!==e.pointerId)return;try{canvas.releasePointerCapture(e.pointerId);}catch{}if(!stroke.ready){stroke.pendingEnd=true;return;}state.active=null;await finishStroke(stroke);};
+ canvas.addEventListener('pointerup',end);canvas.addEventListener('pointercancel',end);
+ tools.hidden=false;toggle?.classList.add('is-active');toggle?.setAttribute('aria-pressed','true');
+ const size=document.querySelector('#lp-eraser-size'),soft=document.querySelector('#lp-eraser-soft');
+ document.querySelector('#lp-eraser-size-value').textContent=size.value+'%';document.querySelector('#lp-eraser-soft-value').textContent=soft.value+'%';
+ document.querySelector('#lp-eraser-undo').disabled=true;
+}
+
 function mount(){
  if(document.querySelector('#little-pet-root'))return;
  const root=document.createElement('div');root.id='little-pet-root';
- root.innerHTML='<section id="lp-panel" class="lp-panel" aria-hidden="true"><header class="lp-header"><div><b>小小桌宠</b><small>摸摸它，看看会不会 DUANG</small></div><button class="lp-close" type="button">×</button></header><div class="lp-image-actions" aria-label="图片操作"><button id="lp-change-image" class="lp-icon-button" type="button" aria-label="更换图片" title="更换图片"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m21 15-5-5L5 20M15 4l5 5"/></svg></button><button id="lp-remove-image" class="lp-icon-button is-danger" type="button" aria-label="移除图片" title="移除图片"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m4 4v6m6-6v6"/></svg></button><input id="lp-file" type="file" accept="image/png,image/webp,image/jpeg" hidden></div><div id="lp-stage" class="lp-stage"><div id="lp-empty" class="lp-empty"><b>放一张图片进来</b><small>支持 PNG、WebP、JPG，建议透明背景立绘</small><button id="lp-upload" type="button">选择图片</button></div></div><div id="lp-controls" class="lp-controls"><div id="lp-jelly-slot" class="lp-jelly-slot"></div><div class="lp-toolbar"><button id="lp-reset" type="button">恢复互动状态</button><button id="lp-release" type="button">放出桌宠</button></div></div><div id="lp-toast" role="status"></div></section>';
+ root.innerHTML='<section id="lp-panel" class="lp-panel" aria-hidden="true"><header class="lp-header"><div><b>小小桌宠</b><small>摸摸它，看看会不会 DUANG</small></div><button class="lp-close" type="button">×</button></header><div class="lp-image-actions" aria-label="图片操作"><button id="lp-change-image" class="lp-icon-button" type="button" aria-label="更换图片" title="更换图片"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m21 15-5-5L5 20M15 4l5 5"/></svg></button><button id="lp-remove-image" class="lp-icon-button is-danger" type="button" aria-label="移除图片" title="移除图片"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m4 4v6m6-6v6"/></svg></button><button id="lp-eraser-toggle" class="lp-icon-button" type="button" aria-label="橡皮擦" title="橡皮擦"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3 15 9-9a2 2 0 0 1 3 0l6 6a2 2 0 0 1 0 3l-5 5H8z"/><path d="m8 20 7-7"/></svg></button><input id="lp-file" type="file" accept="image/png,image/webp,image/jpeg" hidden></div><div id="lp-stage" class="lp-stage"><div id="lp-empty" class="lp-empty"><b>放一张图片进来</b><small>支持 PNG、WebP、JPG，建议透明背景立绘</small><button id="lp-upload" type="button">选择图片</button></div></div><div id="lp-eraser-tools" class="lp-eraser-tools" hidden><label>笔刷大小 <input id="lp-eraser-size" type="range" min="1" max="20" value="7"><output id="lp-eraser-size-value">7%</output></label><label>软度 <input id="lp-eraser-soft" type="range" min="0" max="100" value="65"><output id="lp-eraser-soft-value">65%</output></label><div><button id="lp-eraser-undo" type="button">撤销</button><button id="lp-eraser-done" type="button">完成</button></div></div><div id="lp-controls" class="lp-controls"><div id="lp-jelly-slot" class="lp-jelly-slot"></div><div class="lp-toolbar"><button id="lp-reset" type="button">恢复互动状态</button><button id="lp-release" type="button">放出桌宠</button></div></div><div id="lp-toast" role="status"></div></section>';
  document.body.append(root);
  const panel=root.querySelector('#lp-panel');
  // 将操作面板直接挂到 body，脱离酒馆可能带有 transform 的扩展容器，避免 fixed 定位偏移。
@@ -502,7 +556,7 @@ function mount(){
  const rememberFloatState=f=>{if(!f)return;const r=f.getBoundingClientRect();petFloatState={left:r.left,top:r.top,width:r.width,height:r.height,scale:f._lpCurrentScale||1};};
  const returnPetToEditor=()=>{if(!petFloat||!petRoot)return false;rememberFloatState(petFloat);petFloat.remove();petFloat=null;petRoot.style.transform='';petRoot.style.transformOrigin='';panel.querySelector('#lp-stage').append(petRoot);petImage._ddJellyRehost?.();petRoot._ddPaintBar?.();return true;};
  const open=()=>{if(petFloat)returnPetToEditor();panel.classList.add('is-open');panel.setAttribute('aria-hidden','false');requestAnimationFrame(()=>petImage?._ddJellyRehost?.());};
- const close=()=>{panel.classList.remove('is-open');panel.setAttribute('aria-hidden','true');};
+ const close=()=>{if(petEraser)ddSetEraser(false);panel.classList.remove('is-open');panel.setAttribute('aria-hidden','true');};
  const injectWandButton=()=>{
   const menu=document.querySelector('#extensionsMenu');if(!menu)return false;
   if(menu.querySelector('#little_pet_wand'))return true;
@@ -518,7 +572,20 @@ function mount(){
  panel.querySelector('#lp-upload').addEventListener('click',()=>panel.querySelector('#lp-file').click());
  panel.querySelector('#lp-change-image').addEventListener('click',()=>panel.querySelector('#lp-file').click());
  panel.querySelector('#lp-file').addEventListener('change',async e=>{const f=e.target.files?.[0];e.target.value='';if(!f)return;try{await setPetImage(f);toast('图片已保存');}catch(err){toast(err.message||'图片载入失败');}});
- panel.querySelector('#lp-release').addEventListener('click',()=>{
+ panel.querySelector('#lp-eraser-toggle').addEventListener('click',()=>{if(petEraser)ddSetEraser(false);else ddSetEraser(true);});
+ panel.querySelector('#lp-eraser-size').addEventListener('input',e=>{panel.querySelector('#lp-eraser-size-value').textContent=e.target.value+'%';});
+ panel.querySelector('#lp-eraser-soft').addEventListener('input',e=>{panel.querySelector('#lp-eraser-soft-value').textContent=e.target.value+'%';});
+ panel.querySelector('#lp-eraser-done').addEventListener('click',()=>ddSetEraser(false));
+ panel.querySelector('#lp-eraser-undo').addEventListener('click',async()=>{
+  if(!petEraser||!petEraserHistory.length)return;
+  const blob=petEraserHistory.pop(),bitmap=await createImageBitmap(blob),c=petEraser.canvas,ctx=petEraser.ctx;
+  ctx.clearRect(0,0,c.width,c.height);ctx.drawImage(bitmap,0,0);bitmap.close?.();
+  petBlob=await canvasToBlob(c);await dbPut('pet-image',petBlob);
+  panel.querySelector('#lp-eraser-undo').disabled=!petEraserHistory.length;
+ });
+
+ panel.querySelector('#lp-release').addEventListener('click',async()=>{
+  if(petEraser)await ddSetEraser(false);
   if(!petRoot||!petImage)return toast('请先选择桌宠图片');
   if(petFloat)return;
   const f=document.createElement('div');f.id='lp-float';
@@ -563,7 +630,7 @@ function mount(){
   close();
  });
  panel.querySelector('#lp-reset').addEventListener('click',()=>{if(!petImage)return;petImage._ddJellyAbort?.abort();ddJellyClearSelection(petImage);ddPersistMask(petImage,ddJellyState(petImage));ddAttachJelly(petImage);petImage._ddJellyPrepare?.();toast('互动状态已复位');});
- panel.querySelector('#lp-remove-image').addEventListener('click',async()=>{detachPet();await dbDelete('pet-image');await dbDelete('pet-mask');const stage=panel.querySelector('#lp-stage');stage.replaceChildren(panel.querySelector('#lp-empty'));panel.querySelector('#lp-empty').hidden=false;panel.querySelector('#lp-jelly-slot').replaceChildren();toast('图片已移除');});
+ panel.querySelector('#lp-remove-image').addEventListener('click',async()=>{if(petEraser)await ddSetEraser(false);detachPet();petBlob=null;petEraserHistory=[];await dbDelete('pet-image');await dbDelete('pet-mask');const stage=panel.querySelector('#lp-stage');stage.replaceChildren(panel.querySelector('#lp-empty'));panel.querySelector('#lp-empty').hidden=false;panel.querySelector('#lp-jelly-slot').replaceChildren();toast('图片已移除');});
  // 编辑器入口由酒馆魔法棒菜单提供；不再创建悬浮球。
  dbGet('pet-image').then(blob=>{if(blob)setPetImage(blob).catch(e=>toast(e.message));}).catch(e=>console.warn('[小小桌宠] 恢复图片失败',e));
 }
