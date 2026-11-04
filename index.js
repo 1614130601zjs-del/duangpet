@@ -491,6 +491,21 @@ async function setPetImage(blob){
  const jellySlot=document.querySelector('#lp-jelly-slot');if(jellySlot)jellySlot.replaceChildren();
  ddBuildBar(petRoot,jellySlot||petRoot);petRoot._ddPaintBar?.();await restoreMask(petImage);petImage._ddJellyPrepare?.();petRoot._ddPaintBar?.();document.querySelector('#lp-empty').hidden=true;
 }
+const GALLERY_KEY='pet-gallery';
+const GALLERY_CFG_KEYS=['enabled','jellyOn','jellyScope','jellyTap','jellyDrag','jellyShake','jellyStrength','jellyBrush','feedbackRange','jellyMode'];
+async function getPetGallery(){const list=await dbGet(GALLERY_KEY);return Array.isArray(list)?list:[];}
+async function savePetToGallery(){
+ if(!petImage||!petBlob)throw new Error('请先导入桌宠图片');if(petEraser)await ddSetEraser(false);
+ const S=ddJellyState(petImage),cfg=ddCfg(),settings={};for(const k of GALLERY_CFG_KEYS)if(cfg[k]!==undefined)settings[k]=cfg[k];
+ const list=await getPetGallery(),id='pet-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7),name=(prompt('给这只桌宠取个名字','我的桌宠')||'').trim()||'未命名桌宠';
+ await dbPut('gallery-image:'+id,petBlob);list.unshift({id,name,createdAt:Date.now(),mask:{mask:Array.from(S.mask),has:S.has},settings});await dbPut(GALLERY_KEY,list);return name;
+}
+async function renderPetGallery(page){
+ const list=await getPetGallery(),grid=page.querySelector('.lp-gallery-grid');grid.replaceChildren();
+ if(!list.length){const empty=document.createElement('div');empty.className='lp-gallery-empty';empty.textContent='这里还空着，先收留一只桌宠吧';grid.append(empty);return;}
+ for(const item of list){const card=document.createElement('article');card.className='lp-gallery-card';const img=document.createElement('img');img.alt=item.name;const blob=await dbGet('gallery-image:'+item.id);if(blob)img.src=URL.createObjectURL(blob);const info=document.createElement('div');info.className='lp-gallery-info';const name=document.createElement('b');name.textContent=item.name;const actions=document.createElement('div');actions.className='lp-gallery-actions';const apply=document.createElement('button');apply.type='button';apply.textContent='应用';apply.addEventListener('click',async()=>{try{for(const k of GALLERY_CFG_KEYS)if(item.settings&&item.settings[k]!==undefined)ddCfg()[k]=item.settings[k];ddSave();await dbPut('pet-mask',item.mask||{mask:[],has:false});await setPetImage(await dbGet('gallery-image:'+item.id));page.hidden=true;toast('已切换：'+item.name);}catch(e){toast(e.message||'切换失败');}});const remove=document.createElement('button');remove.type='button';remove.textContent='删除';remove.addEventListener('click',async()=>{if(!confirm('删除「'+item.name+'」？'))return;await dbDelete('gallery-image:'+item.id);await dbPut(GALLERY_KEY,(await getPetGallery()).filter(x=>x.id!==item.id));await renderPetGallery(page);});actions.append(apply,remove);info.append(name,actions);card.append(img,info);grid.append(card);}
+}
+
 
 function canvasToBlob(canvas){return new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('PNG 保存失败')),'image/png'));}
 function ddEraserPoint(canvas,e){const r=canvas.getBoundingClientRect();return {x:(e.clientX-r.left)/Math.max(1,r.width)*canvas.width,y:(e.clientY-r.top)/Math.max(1,r.height)*canvas.height};}
@@ -551,6 +566,8 @@ function mount(){
  root.innerHTML='<section id="lp-panel" class="lp-panel" aria-hidden="true"><header class="lp-header"><div><b>小小桌宠</b><small>摸摸它，看看会不会 DUANG</small></div><button class="lp-close" type="button">×</button></header><div class="lp-image-actions" aria-label="图片操作"><button id="lp-change-image" class="lp-icon-button" type="button" aria-label="更换图片" title="更换图片"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m21 15-5-5L5 20M15 4l5 5"/></svg></button><button id="lp-remove-image" class="lp-icon-button is-danger" type="button" aria-label="移除图片" title="移除图片"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m4 4v6m6-6v6"/></svg></button><button id="lp-eraser-toggle" class="lp-icon-button" type="button" aria-label="橡皮擦" title="橡皮擦"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3 15 9-9a2 2 0 0 1 3 0l6 6a2 2 0 0 1 0 3l-5 5H8z"/><path d="m8 20 7-7"/></svg></button><input id="lp-file" type="file" accept="image/png,image/webp,image/jpeg" hidden></div><div id="lp-stage" class="lp-stage"><div id="lp-empty" class="lp-empty"><b>放一张图片进来</b><small>支持 PNG、WebP、JPG，建议透明背景立绘</small><button id="lp-upload" type="button">选择图片</button></div></div><div id="lp-eraser-tools" class="lp-eraser-tools" hidden><label>笔刷大小 <input id="lp-eraser-size" type="range" min="1" max="20" value="7"><output id="lp-eraser-size-value">7%</output></label><label>软度 <input id="lp-eraser-soft" type="range" min="0" max="100" value="65"><output id="lp-eraser-soft-value">65%</output></label><div><button id="lp-eraser-undo" type="button">撤销</button><button id="lp-eraser-done" type="button">完成</button></div></div><div id="lp-controls" class="lp-controls"><div id="lp-jelly-slot" class="lp-jelly-slot"></div><div class="lp-toolbar"><button id="lp-reset" type="button">恢复互动状态</button><button id="lp-release" type="button">放出桌宠</button></div></div><div id="lp-toast" role="status"></div></section>';
  document.body.append(root);
  const panel=root.querySelector('#lp-panel');
+ const galleryPage=document.createElement('section');galleryPage.id='lp-gallery-page';galleryPage.className='lp-gallery-page';galleryPage.hidden=true;galleryPage.innerHTML='<header class="lp-gallery-header"><button type="button" class="lp-gallery-back">← 返回</button><div><b>桌宠图库</b><small>情人越多越气派哈哈哈</small></div></header><div class="lp-gallery-grid"></div>';
+ panel.append(galleryPage);
  // 将操作面板直接挂到 body，脱离酒馆可能带有 transform 的扩展容器，避免 fixed 定位偏移。
  document.body.append(panel);
  const rememberFloatState=f=>{if(!f)return;const r=f.getBoundingClientRect();petFloatState={left:r.left,top:r.top,width:r.width,height:r.height,scale:f._lpCurrentScale||1};};
@@ -570,6 +587,11 @@ function mount(){
  if(!injectWandButton()){const observer=new MutationObserver(()=>{if(injectWandButton())observer.disconnect();});observer.observe(document.body,{childList:true,subtree:true});}
  panel.querySelector('.lp-close').addEventListener('click',close);
  panel.querySelector('#lp-upload').addEventListener('click',()=>panel.querySelector('#lp-file').click());
+ const galleryToggle=document.createElement('button');galleryToggle.id='lp-gallery-open';galleryToggle.type='button';galleryToggle.className='lp-gallery-open';galleryToggle.textContent='图库';panel.querySelector('.lp-image-actions').append(galleryToggle);
+ const gallerySave=document.createElement('button');gallerySave.id='lp-gallery-save';gallerySave.type='button';gallerySave.className='lp-gallery-save';gallerySave.textContent='保存到图库';panel.querySelector('.lp-toolbar').prepend(gallerySave);
+ galleryToggle.addEventListener('click',async()=>{await renderPetGallery(galleryPage);galleryPage.hidden=false;panel.querySelector('#lp-image-actions')?.setAttribute('hidden','');panel.querySelector('#lp-stage').hidden=true;panel.querySelector('#lp-controls').hidden=true;panel.querySelector('#lp-eraser-tools').hidden=true;});
+ galleryPage.querySelector('.lp-gallery-back').addEventListener('click',()=>{galleryPage.hidden=true;panel.querySelector('#lp-stage').hidden=false;panel.querySelector('#lp-controls').hidden=false;panel.querySelector('.lp-image-actions').hidden=false;});
+ gallerySave.addEventListener('click',async()=>{try{const name=await savePetToGallery();toast('已保存到图库：'+name);}catch(e){toast(e.message||'保存失败');}});
  panel.querySelector('#lp-change-image').addEventListener('click',()=>panel.querySelector('#lp-file').click());
  panel.querySelector('#lp-file').addEventListener('change',async e=>{const f=e.target.files?.[0];e.target.value='';if(!f)return;try{await setPetImage(f);toast('图片已保存');}catch(err){toast(err.message||'图片载入失败');}});
  panel.querySelector('#lp-eraser-toggle').addEventListener('click',()=>{if(petEraser)ddSetEraser(false);else ddSetEraser(true);});
