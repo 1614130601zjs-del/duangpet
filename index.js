@@ -2,7 +2,7 @@ import { extension_settings } from '/scripts/extensions.js';
 import { saveSettingsDebounced } from '/script.js';
 
 const EXT='littlepet';
-const defaults={enabled:true,jellyOn:true,jellyScope:'local',jellyTap:true,jellyDrag:true,jellyShake:false,jellyStrength:'mid',jellyBrush:.075,feedbackRange:100};
+const defaults={enabled:true,jellyOn:true,jellyScope:'local',jellyTap:true,jellyDrag:true,jellyShake:false,jellyStrength:'mid',jellyBrush:.075,feedbackRange:100,interactionMode:'selection',fixedBottom:26};
 function ddCfg(){
  if(!extension_settings[EXT])extension_settings[EXT]={};
  const c=extension_settings[EXT];
@@ -29,7 +29,7 @@ function ddJellyCfg(){
  if(typeof c.jellyTap!=='boolean')c.jellyTap=true;
  if(typeof c.jellyDrag!=='boolean')c.jellyDrag=true;
  if(typeof c.jellyShake!=='boolean')c.jellyShake=false;
- return {on:c.jellyOn,scope:'local',tap:true,drag:c.jellyDrag,shake:c.jellyShake,amp:{soft:.35,mid:.5,bouncy:.65}[c.jellyStrength]||.5};
+ return {on:c.jellyOn,scope:'local',tap:true,drag:c.jellyDrag,shake:c.jellyShake,mode:c.interactionMode==='icon'?'icon':'selection',fixedBottom:Math.max(0,Math.min(70,Number(c.fixedBottom??26)||0)),amp:{soft:.35,mid:.5,bouncy:.65}[c.jellyStrength]||.5};
 }
 function ddJellyBrush(){const b=Number(ddCfg().jellyBrush);return Number.isFinite(b)&&b>0?Math.max(.02,Math.min(.2,b)):.075;}
 function ddJellyState(img){
@@ -87,10 +87,17 @@ function ddAttachJelly(img){
  };
  const rebuildWeights=()=>{
   if(!mv)return;
+  const iconMode=ddCfg().interactionMode==='icon',fixed=Math.max(0,Math.min(70,Number(ddCfg().fixedBottom??26)||0))/100,boundary=1-fixed,band=Math.max(.012,1/Math.max(16,rows));
   for(let j=0;j<=rows;j++)for(let i=0;i<=cols;i++){
    const k=j*(cols+1)+i,u=i/cols,v=j/rows;
-   mv[k]=S.has?maskAt(u,v):1;
-   shw[k]=S.has?mv[k]:Math.pow(Math.sin(Math.PI*u),.6)*Math.pow(Math.sin(Math.PI*v),.6);
+   if(iconMode){
+    // Duang 图标模式：底部比例完全固定，上方区域可形变；过渡只发生在固定线以上。
+    const t=Math.max(0,Math.min(1,(boundary-v)/band)),w=t*t*(3-2*t);
+    mv[k]=w;shw[k]=w;
+   }else{
+    mv[k]=S.has?maskAt(u,v):1;
+    shw[k]=S.has?mv[k]:Math.pow(Math.sin(Math.PI*u),.6)*Math.pow(Math.sin(Math.PI*v),.6);
+   }
   }
  };
  // 选区显示层：低分辨率画布放大，边缘自带柔化
@@ -408,7 +415,9 @@ function ddBuildBar(overlay,mountPoint=overlay){
    // 放大图下方的果冻面板：范围 / 选区 / 交互，不用回设置页。
    const bar=document.createElement('div');bar.className='dd-jelly-bar';bar.setAttribute('role','group');bar.setAttribute('aria-label','果冻互动');
    bar.innerHTML='<div class="dd-jb-head"><button type="button" data-jb="power"></button><button type="button" data-jb="more">设置 ▴</button><button type="button" data-jb-tool="add" aria-label="增加选区（画笔）" title="增加选区" hidden><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20l1-4L16.5 4.5a2 2 0 0 1 3 3L8 19z"/><path d="M14 7l3 3"/></svg></button><button type="button" data-jb-tool="erase" aria-label="擦除选区（橡皮）" title="擦除选区" hidden><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 20h12"/><path d="M5 15l8-8a2 2 0 0 1 3 0l3 3a2 2 0 0 1 0 3l-6 6H9z"/><path d="M9 11l6 6"/></svg></button><button type="button" data-jb="clr" aria-label="清除全部选区" title="清除全部选区" hidden><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg></button><button type="button" data-jb="done" aria-label="完成选区" title="完成" hidden><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg></button><label class="dd-jb-brush" hidden title="画笔粗细"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"/></svg><input type="range" min="2" max="20" step="1" data-jb-brush aria-label="画笔粗细"></label></div>'
-    +'<div class="dd-jb-panel" hidden><div class="dd-jb-row"><b>选区</b><button type="button" data-jb="sel">✎ 涂选区</button><button type="button" data-jb="clr2">清除</button><em class="dd-jb-hint"></em></div>'
+    +'<div class="dd-jb-panel" hidden><div class="dd-jb-row"><b>模式</b><button type="button" data-jb-mode="selection">选区模式</button><button type="button" data-jb-mode="icon">Duang 图标模式</button></div>' 
+    +'<div class="dd-jb-row" data-jb-fixed-row hidden><b>底部固定</b><label class="dd-jb-fixed"><input type="range" min="0" max="70" step="2" data-jb-fixed aria-label="底部固定比例"><output data-jb-fixed-value>26%</output></label><em class="dd-jb-hint" data-jb-icon-hint>底部保持不动，上方可拉扯和摇晃；形变可以越过固定线</em></div>'
+    +'<div class="dd-jb-row" data-jb-selection-row><b>选区</b><button type="button" data-jb="sel">✎ 涂选区</button><button type="button" data-jb="clr2">清除</button><em class="dd-jb-hint"></em></div>'
     +'<div class="dd-jb-row"><b>反馈</b><label class="dd-jb-feedback"><input type="range" min="10" max="250" step="5" data-jb-feedback aria-label="反馈范围"><output data-jb-feedback-value>100%</output></label></div>'
     +'<div class="dd-jb-row"><b>交互</b><button type="button" data-jb-in="drag">拖动</button><button type="button" data-jb-in="shake">摇晃</button>'
     +'<span class="dd-jb-dd"><button type="button" class="dd-jb-dd-btn" data-jb-dd aria-haspopup="listbox" aria-expanded="false"><span data-jb-dd-label>Q弹</span> ▾</button><span class="dd-jb-dd-list" role="listbox" hidden><button type="button" role="option" data-jb-strength="soft">软糯</button><button type="button" role="option" data-jb-strength="mid">Q弹</button><button type="button" role="option" data-jb-strength="bouncy">DUANG</button></span></span></div>'
@@ -417,14 +426,17 @@ function ddBuildBar(overlay,mountPoint=overlay){
    const setMsg=t=>{$b('.dd-jb-msg').textContent=t||'';};
    const feedbackInput=$b('[data-jb-feedback]');const syncFeedbackRange=input=>{if(!input)return;$b('[data-jb-feedback-value]').textContent=input.value+'%';};const showFeedbackPreview=(input)=>{const img=overlay.querySelector('img');if(!img)return;const host=img.parentElement;if(!host)return;let ring=host.querySelector('.dd-jb-feedback-ring');if(!ring){ring=document.createElement('div');ring.className='dd-jb-feedback-ring';host.append(ring);}const feedback=Math.max(.1,Math.min(2.5,Number(input.value||100)/100));const diameter=.34*Math.min(img.clientWidth,img.clientHeight)*feedback;ring.style.width=diameter+'px';ring.style.height=diameter+'px';ring.hidden=false;};const hideFeedbackPreview=()=>{const ring=overlay.querySelector('.dd-jb-feedback-ring');if(ring)ring.hidden=true;};if(feedbackInput){feedbackInput.value=String(ddCfg().feedbackRange||100);syncFeedbackRange(feedbackInput);}
    const paintBar=()=>{
-    const c=ddJellyCfg(),img=overlay.querySelector('img'),S=img?ddJellyState(img):{has:false,selecting:false};
+    const c=ddJellyCfg(),img=overlay.querySelector('img'),S=img?ddJellyState(img):{has:false,selecting:false},mode=ddCfg().interactionMode==='icon'?'icon':'selection',fixed=Math.max(0,Math.min(70,Number(ddCfg().fixedBottom??26)||0));
+    bar.querySelectorAll('[data-jb-mode]').forEach(b=>b.classList.toggle('is-active',b.dataset.jbMode===mode));
+    $b('[data-jb-fixed-row]').hidden=mode!=='icon';$b('[data-jb-selection-row]').hidden=mode!=='selection';
+    $b('[data-jb-fixed]').value=String(fixed);$b('[data-jb-fixed-value]').textContent=fixed+'%';
     $b('[data-jb=power]').textContent=c.on?'果冻：开':'果冻：关';$b('[data-jb=power]').classList.toggle('is-active',c.on);
     bar.classList.toggle('is-off',!c.on);bar.classList.toggle('is-selecting',!!S.selecting);
     const ins={tap:c.tap,drag:c.drag,shake:c.shake};const stv=['soft','bouncy'].includes(ddCfg().jellyStrength)?ddCfg().jellyStrength:'mid';bar.querySelectorAll('[data-jb-strength]').forEach(b=>b.classList.toggle('is-active',b.dataset.jbStrength===stv));{const lab=$b('[data-jb-dd-label]');if(lab)lab.textContent={soft:'软糯',mid:'Q弹',bouncy:'DUANG'}[stv];}bar.querySelectorAll('[data-jb-in]').forEach(b=>b.classList.toggle('is-active',!!ins[b.dataset.jbIn]));
     $b('[data-jb=sel]').classList.toggle('is-active',!!S.selecting);
     $b('.dd-jb-hint').textContent=S.has?'已选区（只有选中的地方会动）':'未选区（整张图都会动）';
-    $b('.dd-jb-brush').hidden=!S.selecting;bar.querySelectorAll('[data-jb-tool]').forEach(t=>{t.hidden=!S.selecting;t.classList.toggle('is-active',(S.tool||'add')===t.dataset.jbTool);});$b('[data-jb=power]').hidden=!!S.selecting;{const bi=$b('[data-jb-brush]');if(bi&&document.activeElement!==bi)bi.value=String(Math.round(ddJellyBrush()*100));}
-    $b('[data-jb=done]').hidden=!S.selecting;$b('[data-jb=clr]').hidden=!S.selecting;$b('[data-jb=more]').hidden=!!S.selecting;
+    $b('.dd-jb-brush').hidden=!S.selecting||mode!=='selection';bar.querySelectorAll('[data-jb-tool]').forEach(t=>{t.hidden=!S.selecting||mode!=='selection';t.classList.toggle('is-active',(S.tool||'add')===t.dataset.jbTool);});$b('[data-jb=power]').hidden=!!S.selecting;{const bi=$b('[data-jb-brush]');if(bi&&document.activeElement!==bi)bi.value=String(Math.round(ddJellyBrush()*100));}
+    $b('[data-jb=done]').hidden=!S.selecting||mode!=='selection';$b('[data-jb=clr]').hidden=!S.selecting||mode!=='selection';$b('[data-jb=more]').hidden=!!S.selecting;
     if(S.selecting)$b('.dd-jb-panel').hidden=true;
     $b('[data-jb=more]').textContent=$b('.dd-jb-panel').hidden?'设置 ▴':'收起 ▾';
    };
@@ -432,6 +444,7 @@ function ddBuildBar(overlay,mountPoint=overlay){
    const rebind=()=>{const img=overlay.querySelector('img');ddAttachJelly(img);img?._ddJellyPrepare?.();paintBar();syncSettings();};
    bar.addEventListener('input',e=>{
     const fi=e.target.closest('[data-jb-feedback]');if(fi){ddCfg().feedbackRange=Number(fi.value);ddSave();syncFeedbackRange(fi);showFeedbackPreview(fi);return;}
+    const fixed=e.target.closest('[data-jb-fixed]');if(fixed){$b('[data-jb-fixed-value]').textContent=fixed.value+'%';return;}
     const bi=e.target.closest('[data-jb-brush]');if(!bi)return;e.stopPropagation();
     ddCfg().jellyBrush=Number(bi.value)/100;ddSave();
     // 临时画一个圈让你看到当前粗细
@@ -441,7 +454,7 @@ function ddBuildBar(overlay,mountPoint=overlay){
     ring.style.cssText='position:absolute;pointer-events:none;z-index:4;border-radius:50%;border:2px solid #ff4081;background:rgba(255,64,129,.25);width:'+d+'px;height:'+d+'px;left:'+(img.offsetLeft+img.clientWidth/2-d/2)+'px;top:'+(img.offsetTop+img.clientHeight/2-d/2)+'px';
     clearTimeout(ring._t);ring._t=setTimeout(()=>ring.remove(),800);
    });
-   bar.addEventListener('change',e=>{if(e.target.closest('[data-jb-feedback]'))hideFeedbackPreview();});
+   bar.addEventListener('change',e=>{if(e.target.closest('[data-jb-feedback]'))hideFeedbackPreview();const fixed=e.target.closest('[data-jb-fixed]');if(fixed){ddCfg().fixedBottom=Number(fixed.value);ddSave();rebind();}});
    bar.addEventListener('pointerup',e=>{if(e.target.closest('[data-jb-feedback]'))hideFeedbackPreview();});
    bar.addEventListener('pointercancel',e=>{if(e.target.closest('[data-jb-feedback]'))hideFeedbackPreview();});
    bar.addEventListener('touchend',e=>{if(e.target.closest('[data-jb-feedback]'))hideFeedbackPreview();},{passive:true});
@@ -449,6 +462,7 @@ function ddBuildBar(overlay,mountPoint=overlay){
    bar.addEventListener('click',async e=>{
     const b=e.target.closest('button');if(!b)return;e.preventDefault();e.stopPropagation();
     const c=ddCfg(),img=overlay.querySelector('img'),S=ddJellyState(img),d=b.dataset;
+    if(d.jbMode){c.interactionMode=d.jbMode;S.selecting=false;ddSave();rebind();return;}
     if(d.jb==='power'){ddJellyCfg();c.jellyOn=!c.jellyOn;if(!c.jellyOn)S.selecting=false;ddSave();rebind();return;}
     if(d.jb==='more'){const p=$b('.dd-jb-panel');p.hidden=!p.hidden;paintBar();return;}
     if(d.jb==='sel'){ddJellyCfg();if(!c.jellyOn){c.jellyOn=true;ddSave();}S.selecting=true;S.tool='add';rebind();return;}
