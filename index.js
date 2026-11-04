@@ -168,7 +168,6 @@ function animate() {
     pet.raf = 0;
     if (pet.pointer) {
         drawPet();
-        pet.raf = requestAnimationFrame(animate);
         return;
     }
     pet.vx += -pet.pullX * .16; pet.vy += -pet.pullY * .16;
