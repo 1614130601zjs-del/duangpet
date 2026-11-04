@@ -82,7 +82,9 @@ async function clearPetImage() {
 
 const BALL = '<svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lp-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f8c9d9"/><stop offset="1" stop-color="#d78eae"/></linearGradient></defs><path d="M32 5c-15 0-26 11-26 26 0 14 11 27 26 27s26-13 26-27C58 16 47 5 32 5Z" fill="url(#lp-g)"/><path d="M18 25c2-5 7-8 13-8" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" opacity=".8"/><circle cx="23" cy="34" r="2.7" fill="#765565"/><circle cx="41" cy="34" r="2.7" fill="#765565"/><path d="M28 42q4 4 8 0" fill="none" stroke="#765565" stroke-width="2.4" stroke-linecap="round"/></svg>';
 
-let maskMode = 'paint';\nlet maskStroke = null;\nlet pet = { maskCanvas: null, maskCtx: null, maskOverlay: null, maskOverlayCtx: null, maskPixels: null, image: null, url: '', gl: null, program: null, texture: null, positionBuffer: null, uvBuffer: null, indexBuffer: null, cols: 36, rows: 36, positions: null, uvs: null, indices: null, indexCount: 0, width: 0, height: 0, raf: 0, pointer: null, cx: 0, cy: 0, pullX: 0, pullY: 0, vx: 0, vy: 0 };
+let maskMode = 'paint';
+let maskStroke = null;
+let pet = { maskCanvas: null, maskCtx: null, maskOverlay: null, maskOverlayCtx: null, maskPixels: null, image: null, url: '', gl: null, program: null, texture: null, positionBuffer: null, uvBuffer: null, indexBuffer: null, cols: 36, rows: 36, positions: null, uvs: null, indices: null, indexCount: 0, width: 0, height: 0, raf: 0, pointer: null, cx: 0, cy: 0, pullX: 0, pullY: 0, vx: 0, vy: 0 };
 
 function shader(gl, type, source) {
     const s = gl.createShader(type);
@@ -311,7 +313,8 @@ function bindMaskEditor() {
     const stroke = (x, y) => {
         if (!pet.maskCtx) return;
         const size = Number(document.querySelector('#lp-mask-brush')?.value || 32);
-        const rect = overlay.getBoundingClientRect();\n        const radius = Math.max(2, size * pet.maskCanvas.width / Math.max(1, rect.width));
+        const rect = overlay.getBoundingClientRect();
+        const radius = Math.max(2, size * pet.maskCanvas.width / Math.max(1, rect.width));
         const g = pet.maskCtx.createRadialGradient(x, y, 0, x, y, radius);
         g.addColorStop(0, 1); g.addColorStop(.68, .82); g.addColorStop(1, 0);
         pet.maskCtx.save();
