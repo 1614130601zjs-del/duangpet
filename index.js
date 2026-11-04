@@ -5,7 +5,7 @@ import { extension_settings } from '/scripts/extensions.js';
 import { saveSettingsDebounced } from '/script.js';
 
 const EXT = 'littlepet';
-const DEFAULTS = { enabled: true, ballX: 1, ballY: .58, brush: 24, strength: 72, softness: 76, feedback: 100 };
+const DEFAULTS = { enabled: true, ballX: 1, ballY: .58, brush: 24, strength: 72, softness: 76, feedback: 100, shake: false };
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 function cfg() {
     if (!extension_settings[EXT]) extension_settings[EXT] = {};
@@ -178,7 +178,7 @@ function drawPet() {
         const dx = px - pet.cx, dy = py - pet.cy, d2 = dx * dx + dy * dy;
         const maskWeight = maskAtUv(x / pet.cols, y / pet.rows);
         const weight = Math.exp(-d2 / (radius2 * softness)) * maskWeight;
-        const edge = Math.exp(-d2 / (radius2 * 2.1)) * maskWeight;
+        const edge = Math.exp(-d2 / (radius2 * 1.67)) * maskWeight;
         const squeeze = Math.min(.34, displacement / Math.max(brushRadius, 1) * .34) * weight;
         pet.positions[k * 2] = clamp(px + pet.pullX * weight - dx * squeeze * .42 + pet.pullX * edge * .12, 0, pet.width);
         pet.positions[k * 2 + 1] = clamp(py + pet.pullY * weight - dy * squeeze * .42 + pet.pullY * edge * .12, 0, pet.height);
@@ -213,6 +213,42 @@ function animate() {
     else { pet.pullX = pet.pullY = pet.vx = pet.vy = 0; drawPet(); }
 }
 function wake() { if (!pet.raf) pet.raf = requestAnimationFrame(animate); }
+function applyMotionShake() {
+    const c = cfg();
+    if (!c.shake || !pet.image || !pet.maskPixels) return;
+    if (typeof DeviceMotionEvent === 'undefined') return toast('当前浏览器不支持摇晃感应');
+    const attach = () => {
+        if (pet.motionHandler) return;
+        pet.motionHandler = e => {
+            if (pet.pointer) return;
+            let ax = 0, ay = 0;
+            const a = e.acceleration;
+            if (a && (a.x != null || a.y != null)) { ax = a.x || 0; ay = a.y || 0; }
+            else { const g = e.accelerationIncludingGravity || {}; ax = g.x || 0; ay = g.y || 0; }
+            if (Math.abs(ax) + Math.abs(ay) < 1.2) return;
+            const amp = clamp(Number(cfg().strength) / 72, .25, 1.7);
+            const unit = Math.min(pet.width, pet.height) * .05 * amp;
+            pet.cx = pet.width / 2; pet.cy = pet.height / 2;
+            pet.vx += clamp(-ax * .025, -.12, .12) * unit;
+            pet.vy += clamp(ay * .025, -.12, .12) * unit;
+            wake();
+        };
+        window.addEventListener('devicemotion', pet.motionHandler);
+        toast('摇晃互动已开启，晃动设备试试');
+    };
+    const permission = DeviceMotionEvent.requestPermission;
+    if (typeof permission === 'function') permission.call(DeviceMotionEvent).then(result => {
+        if (result === 'granted') attach();
+        else { cfg().shake = false; save(); syncShakeButton(); toast('没有获得动作传感器权限'); }
+    }).catch(() => { cfg().shake = false; save(); syncShakeButton(); toast('请求动作传感器权限失败'); });
+    else attach();
+}
+function syncShakeButton() {
+    const button = document.querySelector('#lp-shake-toggle');
+    if (!button) return;
+    button.textContent = cfg().shake ? '关闭摇晃互动' : '开启摇晃互动';
+    button.classList.toggle('is-active', !!cfg().shake);
+}
 function pointerPosition(e) {
     const r = e.currentTarget.getBoundingClientRect();
     return [clamp(e.clientX - r.left, 0, r.width), clamp(e.clientY - r.top, 0, r.height)];
@@ -390,7 +426,7 @@ function mount() {
         '<div class="lp-stage" id="lp-stage"><div class="lp-empty" id="lp-empty"><span class="lp-empty-mark">＋</span><b>放一张 PNG 进来</b><small>建议使用透明背景的角色立绘</small><button id="lp-upload" type="button">选择图片</button></div><div id="lp-canvas-wrap"><canvas id="lp-pet-canvas" aria-label="触摸并拖动桌宠"></canvas><canvas id="lp-mask-overlay" aria-label="涂抹互动选区"></canvas></div></div>' +
         '<div class="lp-toolbar"><label class="lp-file-label">更换图片<input id="lp-file" type="file" accept="image/png,image/webp,image/jpeg"></label><button id="lp-reset" type="button">恢复形变</button><button id="lp-remove" type="button">移除图片</button></div>' +
         '<div class="lp-mask-tools"><span>互动选区</span><button id="lp-mask-paint" type="button" class="is-active">涂抹选区</button><button id="lp-mask-erase" type="button">擦除选区</button><button id="lp-mask-clear" type="button">清空选区</button><button id="lp-mask-preview" type="button">互动预览</button><button id="lp-mask-release" type="button">放出桌宠</button><label>选区笔刷 <input id="lp-mask-brush" type="range" min="8" max="100" value="32"><output id="lp-mask-brush-value">32</output></label></div>' +
-        '<div class="lp-controls">' +
+        '<div class="lp-controls"><button id="lp-shake-toggle" type="button">开启摇晃互动</button>' +
           '<label><span>笔刷范围 <output id="lp-brush-value"></output></span><input id="lp-brush" type="range" min="10" max="45" step="1"></label>' +
           '<label><span>摇晃强度 <output id="lp-strength-value"></output></span><input id="lp-strength" type="range" min="25" max="120" step="1"></label>' +
           '<label><span>边缘柔和 <output id="lp-softness-value"></output></span><input id="lp-softness" type="range" min="30" max="100" step="1"></label>' +
@@ -525,10 +561,17 @@ function mount() {
         await clearPetImage(); await clearAsset('pet-mask'); stopFrame(); pet.pointer = null; pet.image = null;
         pet.maskCanvas = pet.maskCtx = pet.maskPixels = null;
         if (pet.url) URL.revokeObjectURL(pet.url); pet.url = '';
+        if (pet.motionHandler) window.removeEventListener('devicemotion', pet.motionHandler); pet.motionHandler = null;
         const canvas = root.querySelector('#lp-pet-canvas');
         canvas.width = 1; canvas.height = 1; canvas.style.width = '0'; canvas.style.height = '0'; canvas.style.display = 'none';
         root.querySelector('#lp-empty').hidden = false; toast('已移除桌宠图片');
     });
+    root.querySelector('#lp-shake-toggle').addEventListener('click', () => {
+        cfg().shake = !cfg().shake; save(); syncShakeButton();
+        if (cfg().shake) applyMotionShake();
+        else { if (pet.motionHandler) window.removeEventListener('devicemotion', pet.motionHandler); pet.motionHandler = null; toast('摇晃互动已关闭'); }
+    });
+    syncShakeButton();
     for (const key of ['brush', 'strength', 'softness', 'feedback']) {
         const input = root.querySelector('#lp-' + key), output = root.querySelector('#lp-' + key + '-value');
         input.value = cfg()[key]; output.value = cfg()[key] + '%';
