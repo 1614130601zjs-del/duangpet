@@ -488,7 +488,8 @@ async function setPetImage(blob){
  if(!blob)return;if(petEraser)await ddSetEraser(false);detachPet();petBlob=blob;petEraserHistory=[];await dbPut('pet-image',blob);if(petUrl)URL.revokeObjectURL(petUrl);petUrl=URL.createObjectURL(blob);
  const made=makePetRoot(petUrl);petRoot=made.root;petImage=made.img;const stage=document.querySelector('#lp-stage');stage.replaceChildren(petRoot);
  await new Promise((resolve,reject)=>{petImage.onload=resolve;petImage.onerror=()=>reject(new Error('图片载入失败'));});
- ddBuildBar(petRoot,document.querySelector('#lp-jelly-slot'));petRoot._ddPaintBar?.();await restoreMask(petImage);petImage._ddJellyPrepare?.();petRoot._ddPaintBar?.();document.querySelector('#lp-empty').hidden=true;
+ const jellySlot=document.querySelector('#lp-jelly-slot');if(jellySlot)jellySlot.replaceChildren();
+ ddBuildBar(petRoot,jellySlot||petRoot);petRoot._ddPaintBar?.();await restoreMask(petImage);petImage._ddJellyPrepare?.();petRoot._ddPaintBar?.();document.querySelector('#lp-empty').hidden=true;
 }
 
 function canvasToBlob(canvas){return new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('PNG 保存失败')),'image/png'));}
