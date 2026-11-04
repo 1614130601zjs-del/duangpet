@@ -400,6 +400,10 @@ function ddBuildBar(overlay,mountPoint=overlay){
     clearTimeout(ring._t);ring._t=setTimeout(()=>ring.remove(),800);
    });
    bar.addEventListener('change',e=>{if(e.target.closest('[data-jb-feedback]'))hideFeedbackPreview();});
+   bar.addEventListener('pointerup',e=>{if(e.target.closest('[data-jb-feedback]'))hideFeedbackPreview();});
+   bar.addEventListener('pointercancel',e=>{if(e.target.closest('[data-jb-feedback]'))hideFeedbackPreview();});
+   bar.addEventListener('touchend',e=>{if(e.target.closest('[data-jb-feedback]'))hideFeedbackPreview();},{passive:true});
+   bar.addEventListener('touchcancel',e=>{if(e.target.closest('[data-jb-feedback]'))hideFeedbackPreview();},{passive:true});
    bar.addEventListener('click',async e=>{
     const b=e.target.closest('button');if(!b)return;e.preventDefault();e.stopPropagation();
     const c=ddCfg(),img=overlay.querySelector('img'),S=ddJellyState(img),d=b.dataset;
