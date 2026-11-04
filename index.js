@@ -467,11 +467,12 @@ function mount(){
  const injectWandButton=()=>{
   const menu=document.querySelector('#extensionsMenu');if(!menu)return false;
   if(menu.querySelector('#little_pet_wand'))return true;
+  const container=document.createElement('div');container.id='little_pet_wand_container';container.className='extension_container';
   const item=document.createElement('div');item.id='little_pet_wand';item.className='list-group-item flex-container flexGap5';
   const icon=document.createElement('div');icon.className='fa-solid fa-paw extensionsMenuExtensionButton';
   item.append(icon,document.createTextNode('小小桌宠'));
   item.addEventListener('click',()=>panel.classList.contains('is-open')?close():open());
-  menu.append(item);return true;
+  container.append(item);menu.append(container);return true;
  };
  if(!injectWandButton()){const observer=new MutationObserver(()=>{if(injectWandButton())observer.disconnect();});observer.observe(document.body,{childList:true,subtree:true});}
  panel.querySelector('.lp-close').addEventListener('click',close);
