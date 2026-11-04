@@ -172,8 +172,9 @@ function drawPet() {
         const k = y * (pet.cols + 1) + x;
         const px = x / pet.cols * pet.width, py = y / pet.rows * pet.height;
         const dx = px - pet.cx, dy = py - pet.cy, d2 = dx * dx + dy * dy;
-        const weight = Math.exp(-d2 / (radius2 * softness));
-        const edge = Math.exp(-d2 / (radius2 * 2.1));
+        const maskWeight = maskAtUv(x / pet.cols, y / pet.rows);
+        const weight = Math.exp(-d2 / (radius2 * softness)) * maskWeight;
+        const edge = Math.exp(-d2 / (radius2 * 2.1)) * maskWeight;
         const squeeze = Math.min(.34, displacement / Math.max(brushRadius, 1) * .34) * weight;
         pet.positions[k * 2] = clamp(px + pet.pullX * weight - dx * squeeze * .42 + pet.pullX * edge * .12, 0, pet.width);
         pet.positions[k * 2 + 1] = clamp(py + pet.pullY * weight - dy * squeeze * .42 + pet.pullY * edge * .12, 0, pet.height);
@@ -219,6 +220,7 @@ function bindPetTouch() {
     canvas.addEventListener('pointerdown', e => {
         if (e.pointerType === 'mouse' && e.button !== 0) return;
         const [x, y] = pointerPosition(e);
+        if (maskAtPoint(x, y) < .12) return;
         pet.pointer = { id: e.pointerId, startX: x, startY: y };
         pet.cx = x; pet.cy = y;
         try { canvas.setPointerCapture(e.pointerId); } catch {}
