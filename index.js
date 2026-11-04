@@ -72,10 +72,11 @@ function ddAttachJelly(img){
  const destroy=()=>{cancelAnimationFrame(raf);raf=0;img.style.visibility=originalVisibility;try{canvas?.remove();}catch{}try{selCv?.remove();}catch{}canvas=null;selCv=null;gl=null;};
  ac.signal.addEventListener('abort',destroy);
  const box=()=>{
-  const r=img.getBoundingClientRect(),cs=getComputedStyle(img);
+  // 使用未受 CSS transform 缩放的布局尺寸；浮窗缩放时不能拿屏幕像素尺寸重复缩放画布。
+  const cs=getComputedStyle(img);
   const f=n=>parseFloat(cs[n])||0;
   const l=f('paddingLeft')+f('borderLeftWidth'),t=f('paddingTop')+f('borderTopWidth'),rr=f('paddingRight')+f('borderRightWidth'),b=f('paddingBottom')+f('borderBottomWidth');
-  return {left:l,top:t,w:Math.max(10,r.width-l-rr),h:Math.max(10,r.height-t-b)};
+  return {left:l,top:t,w:Math.max(10,img.offsetWidth-l-rr),h:Math.max(10,img.offsetHeight-t-b)};
  };
  const compile=(type,src)=>{const sh=gl.createShader(type);gl.shaderSource(sh,src);gl.compileShader(sh);if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS))throw new Error('shader');return sh;};
  // 选区采样（双线性），返回 0~1
@@ -207,7 +208,7 @@ function ddAttachJelly(img){
  };
  const show=()=>{if(canvas&&!shown){canvas.style.display='block';img.style.visibility='hidden';shown=true;}};
  const kick=()=>{if(!raf)raf=requestAnimationFrame(tick);};
- const local=e=>{const r=img.getBoundingClientRect(),bx=box();return [Math.max(0,Math.min(boxW,e.clientX-r.left-bx.left)),Math.max(0,Math.min(boxH,e.clientY-r.top-bx.top))];};
+ const local=e=>{const r=img.getBoundingClientRect(),bx=box(),sx=img.offsetWidth/Math.max(1,r.width),sy=img.offsetHeight/Math.max(1,r.height);return [Math.max(0,Math.min(boxW,(e.clientX-r.left)*sx-bx.left)),Math.max(0,Math.min(boxH,(e.clientY-r.top)*sy-bx.top))];};
  // 涂选区：自由手绘，高斯笔刷取最大值，边缘柔和
  const paintAt=(x,y)=>{
   const erase=S.tool==='erase',u=x/boxW,v=y/boxH,rad=ddJellyBrush()*Math.min(boxW,boxH),rr=rad*rad*1.3;
