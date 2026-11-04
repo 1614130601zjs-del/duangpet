@@ -70,12 +70,58 @@ function ddAttachJellyIconShake(img,conf){
  host.append(wrap);place();img.style.visibility='hidden';
  const ro=typeof ResizeObserver!=='undefined'?new ResizeObserver(place):null;ro?.observe(img);
  window.addEventListener('resize',place,sig);
- const st={r:0,vr:0,s:0,vs:0};let raf=0,gx=0,gy=0,primed=false;
+ const st={r:0,vr:0,s:0,vs:0},dragState={x:[0,0,1,1,0],v:[0,0,0,0,0],t:[0,0,1,1,0]};let raf=0,dragRaf=0,drag=null,gx=0,gy=0,primed=false;
+ const apply=()=>{
+  const shake='skewX('+(-st.r).toFixed(2)+'deg) scale('+(1-st.s*.5).toFixed(3)+','+(1+st.s).toFixed(3)+')';
+  const d=dragState.x,move='translate('+d[0].toFixed(2)+'px,'+d[1].toFixed(2)+'px) rotate('+d[4].toFixed(3)+'deg) scale('+d[2].toFixed(4)+','+d[3].toFixed(4)+')';
+  top.style.transform=shake+' '+move;
+ };
+ const dragTick=()=>{
+  let moving=false;
+  for(let i=0;i<5;i++){
+   if(drag&&i<4){dragState.x[i]=dragState.t[i];dragState.v[i]=0;}
+   else{dragState.v[i]+=(dragState.t[i]-dragState.x[i])*.16;dragState.v[i]*=.80;dragState.x[i]+=dragState.v[i];}
+   if(Math.abs(dragState.v[i])>.0008||Math.abs(dragState.t[i]-dragState.x[i])>.0008)moving=true;
+  }
+  apply();
+  if(moving||drag)dragRaf=requestAnimationFrame(dragTick);
+  else{dragRaf=0;dragState.x=[0,0,1,1,0];dragState.v=[0,0,0,0,0];apply();}
+ };
+ const kickDrag=()=>{if(!dragRaf)dragRaf=requestAnimationFrame(dragTick);};
+ const restDrag=()=>{dragState.t=[0,0,1,1,0];};
+ const squish=()=>{dragState.x[2]=1+.11*ddJellyCfg().amp;dragState.x[3]=1-.14*ddJellyCfg().amp;dragState.v[2]=dragState.v[3]=0;restDrag();kickDrag();};
+ img.style.touchAction='none';img.draggable=false;
+ img.addEventListener('pointerdown',e=>{
+  if(e.pointerType==='mouse'&&e.button!==0)return;
+  drag={id:e.pointerId,x:e.clientX,y:e.clientY,t:Date.now(),moved:false};
+  try{img.setPointerCapture(e.pointerId);}catch{}e.preventDefault();
+ },sig);
+ img.addEventListener('pointermove',e=>{
+  if(!drag||drag.id!==e.pointerId)return;
+  const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
+  if(!drag.moved&&Math.hypot(dx,dy)<6)return;drag.moved=true;
+  if(!ddCfg().jellyDrag)return;
+  const w=img.clientWidth||300,h=img.clientHeight||300,damp=v=>Math.sign(v)*Math.pow(Math.abs(v),.82)*.55;
+  const ax=Math.abs(dx)/w,ay=Math.abs(dy)/h,amp=ddJellyCfg().amp;
+  dragState.t[0]=damp(dx);dragState.t[1]=damp(dy);
+  dragState.t[2]=(1+Math.min(.38,ax*.9*amp))*(1-Math.min(.38,ay*.9*amp)*.45);
+  dragState.t[3]=(1+Math.min(.38,ay*.9*amp))*(1-Math.min(.38,ax*.9*amp)*.45);
+  dragState.t[4]=Math.max(-6,Math.min(6,dx/w*5*amp));kickDrag();
+ },sig);
+ const dragEnd=e=>{
+  if(!drag||e.pointerId!==drag.id)return;const d=drag;drag=null;try{img.releasePointerCapture(d.id);}catch{}
+  const quick=Date.now()-d.t<450&&!d.moved;
+  if(quick&&ddCfg().jellyTap){squish();return;}
+  if(d.moved&&ddCfg().jellyDrag){dragState.v[2]-=(dragState.x[2]-1)*.35;dragState.v[3]-=(dragState.x[3]-1)*.35;}
+  restDrag();kickDrag();
+ };
+ img.addEventListener('pointerup',dragEnd,sig);img.addEventListener('pointercancel',dragEnd,sig);
+ img.addEventListener('contextmenu',e=>{if(drag)e.preventDefault();},sig);
  const tick=()=>{
   st.vr+=-st.r*.1;st.vr*=.9;st.r+=st.vr;
   st.vs+=-st.s*.14;st.vs*=.86;st.s+=st.vs;
   const live=Math.abs(st.r)+Math.abs(st.vr)+Math.abs(st.s*30)+Math.abs(st.vs*30)>.08;
-  top.style.transform=live?'skewX('+(-st.r).toFixed(2)+'deg) scale('+(1-st.s*.5).toFixed(3)+','+(1+st.s).toFixed(3)+')':'';
+  apply();
   raf=live?requestAnimationFrame(tick):0;
  };
  window.addEventListener('devicemotion',e=>{
@@ -88,7 +134,7 @@ function ddAttachJellyIconShake(img,conf){
   st.vr+=cl(-ax*.45*k,5*k);st.vs+=cl(ay*.012*k,.05*k);st.r=cl(st.r,20);st.s=cl(st.s,.25);
   if(!raf)raf=requestAnimationFrame(tick);
  },sig);
- const cleanup=()=>{if(raf)cancelAnimationFrame(raf);raf=0;ro?.disconnect();wrap.remove();img.style.visibility=originalVisibility;host.style.position=originalPosition;};
+ const cleanup=()=>{if(raf)cancelAnimationFrame(raf);if(dragRaf)cancelAnimationFrame(dragRaf);raf=dragRaf=0;ro?.disconnect();wrap.remove();img.style.visibility=originalVisibility;host.style.position=originalPosition;img.style.touchAction='';};
  ac.signal.addEventListener('abort',cleanup,{once:true});img._ddJellyRehost=place;
 }
 function ddAttachJelly(img){
