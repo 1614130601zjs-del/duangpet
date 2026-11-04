@@ -2,6 +2,7 @@ import { extension_settings } from '/scripts/extensions.js';
 import { saveSettingsDebounced } from '/script.js';
 
 const EXT='littlepet';
+const defaults={enabled:true,jellyOn:true,jellyScope:'local',jellyTap:true,jellyDrag:true,jellyShake:false,jellyStrength:'mid',jellyBrush:.075,feedbackRange:100};
 function ddCfg(){
  if(!extension_settings[EXT])extension_settings[EXT]={};
  const c=extension_settings[EXT];
@@ -28,6 +29,7 @@ function ddJellyCfg(){
  if(typeof c.jellyTap!=='boolean')c.jellyTap=true;
  if(typeof c.jellyDrag!=='boolean')c.jellyDrag=true;
  if(typeof c.jellyShake!=='boolean')c.jellyShake=false;
+ return {on:c.jellyOn,scope:'local',tap:true,drag:c.jellyDrag,shake:c.jellyShake,amp:{soft:.35,mid:.5,bouncy:.65}[c.jellyStrength]||.5};
 }
 function ddJellyBrush(){const b=Number(ddCfg().jellyBrush);return Number.isFinite(b)&&b>0?Math.max(.02,Math.min(.2,b)):.075;}
 function ddJellyState(img){
