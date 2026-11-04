@@ -2,7 +2,7 @@ import { extension_settings } from '/scripts/extensions.js';
 import { saveSettingsDebounced } from '/script.js';
 
 const EXT='littlepet';
-const defaults={enabled:true,jellyOn:true,jellyScope:'local',jellyTap:true,jellyDrag:true,jellyShake:false,jellyStrength:'mid',jellyBrush:.075,feedbackRange:100};
+const defaults={enabled:true,jellyOn:true,jellyScope:'local',jellyTap:true,jellyDrag:true,jellyShake:false,jellyStrength:'mid',jellyBrush:.075,feedbackRange:100,shakeMode:'select',pinFixed:30};
 function ddCfg(){
  if(!extension_settings[EXT])extension_settings[EXT]={};
  const c=extension_settings[EXT];
@@ -189,7 +189,7 @@ function ddAttachJelly(img){
   activeRanges=[];
  };
  const draw=()=>{
-  const m=Math.min(boxW,boxH),feedback=Math.max(.1,Math.min(2.5,Number(ddCfg().feedbackRange||100)/100)),R=.17*m*feedback,R2=.22*m*feedback,RR=R*R,RR2=R2*R2,shAmp=.05*m*amp;
+  const m=Math.min(boxW,boxH),feedback=Math.max(.1,Math.min(2.5,Number(ddCfg().feedbackRange||100)/100)),R=.17*m*feedback,R2=.22*m*feedback,RR=R*R,RR2=R2*R2,shAmp=.05*m*amp,pinOn=ddCfg().shakeMode==='pin',pinY=boxH*(1-Math.max(0,Math.min(70,Number(ddCfg().pinFixed)||0))/100),kk=amp/.5;
   const useLocal=scope!=='whole',useAff=scope==='whole';
   const [tx,ty,sx,sy,rot]=aff.x,cr=Math.cos(rot*Math.PI/180),sr=Math.sin(rot*Math.PI/180),mx0=boxW/2,my0=boxH/2;
   const shOn=Math.abs(shk.x)>.0005||Math.abs(shk.y)>.0005;
@@ -199,7 +199,7 @@ function ddAttachJelly(img){
     for(let i=r.start;i<=r.end;i++){
      const k=r.row*(cols+1)+i,px=baseX[k],py=baseY[k],dx=px-cx,dy=py-cy,w=localW[k],w2=localW2[k],f=1-dep.x*w;
      let x=cx+dx*f+ox.x*w2+ofx[k],y=cy+dy*f+oy.x*w2+ofy[k];
-     if(shOn){const q=shw[k];x+=shk.x*shAmp*q*(1+.6*(py/boxH-.5));y+=shk.y*shAmp*q*(1+.4*(px/boxW-.5));}
+     if(shOn){if(pinOn){const u=Math.max(0,(pinY-py)/Math.max(1,pinY));x+=shk.x*boxH*.12*kk*u;if(y<pinY)y=pinY-(pinY-y)*(1+shk.y*.05*kk);}else{const q=shw[k];x+=shk.x*shAmp*q*(1+.6*(py/boxH-.5));y+=shk.y*shAmp*q*(1+.4*(px/boxW-.5));}}
      pos[k*2]=Math.max(-padX,Math.min(boxW+padX,x));pos[k*2+1]=Math.max(-padY,Math.min(boxH+padY,y));
     }
     gl.bufferSubData(gl.ARRAY_BUFFER,first*8,pos.subarray(first*2,(last+1)*2));
@@ -209,7 +209,7 @@ function ddAttachJelly(img){
     const k=j*(cols+1)+i,px=baseX[k],py=baseY[k],m1=mv[k];let x=px,y=py;
     if(useLocal){const dx=px-cx,dy=py-cy,d2=dx*dx+dy*dy,w=Math.exp(-d2/RR)*m1,w2=Math.exp(-d2/RR2)*m1,f=1-dep.x*w;x=cx+dx*f+ox.x*w2+ofx[k];y=cy+dy*f+oy.x*w2+ofy[k];}
     if(useAff){const dxc=px-mx0,dyc=py-my0,X=mx0+tx+(dxc*cr-dyc*sr)*sx,Y=my0+ty+(dxc*sr+dyc*cr)*sy;x=px+(X-px)*m1;y=py+(Y-py)*m1;}
-     if(shOn){const q=shw[k];x+=shk.x*shAmp*q*(1+.6*(py/boxH-.5));y+=shk.y*shAmp*q*(1+.4*(px/boxW-.5));}
+     if(shOn){if(pinOn){const u=Math.max(0,(pinY-py)/Math.max(1,pinY));x+=shk.x*boxH*.12*kk*u;if(y<pinY)y=pinY-(pinY-y)*(1+shk.y*.05*kk);}else{const q=shw[k];x+=shk.x*shAmp*q*(1+.6*(py/boxH-.5));y+=shk.y*shAmp*q*(1+.4*(px/boxW-.5));}}
      pos[k*2]=Math.max(-padX,Math.min(boxW+padX,x));pos[k*2+1]=Math.max(-padY,Math.min(boxH+padY,y));
    }
    gl.bufferSubData(gl.ARRAY_BUFFER,0,pos);
@@ -329,8 +329,9 @@ function ddAttachJelly(img){
    if(Math.abs(ax)+Math.abs(ay)<1.2)return;
    if(!ensure())return;
    show();
-    shk.vx+=Math.max(-1.2,Math.min(1.2,-ax*.025*amp));shk.vy+=Math.max(-1.2,Math.min(1.2,ay*.025*amp));
-    shk.x=Math.max(-1.6,Math.min(1.6,shk.x));shk.y=Math.max(-1.6,Math.min(1.6,shk.y));
+    const pinM=ddCfg().shakeMode==='pin',lim=pinM?2.2:1.2,cap=pinM?3.2:1.6;
+    const gain=pinM?.05:.025;shk.vx+=Math.max(-lim,Math.min(lim,-ax*gain*amp));shk.vy+=Math.max(-lim,Math.min(lim,ay*gain*amp));
+    shk.x=Math.max(-cap,Math.min(cap,shk.x));shk.y=Math.max(-cap,Math.min(cap,shk.y));
     kick();
   },sig);
  }
@@ -414,6 +415,8 @@ function ddBuildBar(overlay,mountPoint=overlay){
    bar.innerHTML='<div class="dd-jb-head"><button type="button" data-jb="power"></button><button type="button" data-jb="more">设置 ▴</button><button type="button" data-jb-tool="add" aria-label="增加选区（画笔）" title="增加选区" hidden><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20l1-4L16.5 4.5a2 2 0 0 1 3 3L8 19z"/><path d="M14 7l3 3"/></svg></button><button type="button" data-jb-tool="erase" aria-label="擦除选区（橡皮）" title="擦除选区" hidden><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 20h12"/><path d="M5 15l8-8a2 2 0 0 1 3 0l3 3a2 2 0 0 1 0 3l-6 6H9z"/><path d="M9 11l6 6"/></svg></button><button type="button" data-jb="clr" aria-label="清除全部选区" title="清除全部选区" hidden><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg></button><button type="button" data-jb="done" aria-label="完成选区" title="完成" hidden><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg></button><label class="dd-jb-brush" hidden title="画笔粗细"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"/></svg><input type="range" min="2" max="20" step="1" data-jb-brush aria-label="画笔粗细"></label></div>'
     +'<div class="dd-jb-panel" hidden><div class="dd-jb-row" data-jb-selection-row><b>选区</b><button type="button" data-jb="sel">✎ 涂选区</button><button type="button" data-jb="clr2">清除</button><em class="dd-jb-hint"></em></div>'
     +'<div class="dd-jb-row"><b>反馈</b><label class="dd-jb-feedback"><input type="range" min="10" max="250" step="5" data-jb-feedback aria-label="反馈范围"><output data-jb-feedback-value>100%</output></label></div>'
+    +'<div class="dd-jb-row"><b>晃动</b><button type="button" data-jb-mode="select">选区</button><button type="button" data-jb-mode="pin">固定底部</button></div>'
+    +'<div class="dd-jb-row" data-jb-pinrow hidden><b>固定</b><label class="dd-jb-feedback"><input type="range" min="0" max="70" step="1" data-jb-pin aria-label="底部固定比例"><output data-jb-pin-value>30%</output></label><em class="dd-jb-hint">底部这么多不动，上半身甩</em></div>'
     +'<div class="dd-jb-row"><b>交互</b><button type="button" data-jb-in="drag">拖动</button><button type="button" data-jb-in="shake">摇晃</button>'
     +'<span class="dd-jb-dd"><button type="button" class="dd-jb-dd-btn" data-jb-dd aria-haspopup="listbox" aria-expanded="false"><span data-jb-dd-label>Q弹</span> ▾</button><span class="dd-jb-dd-list" role="listbox" hidden><button type="button" role="option" data-jb-strength="soft">软糯</button><button type="button" role="option" data-jb-strength="mid">Q弹</button><button type="button" role="option" data-jb-strength="bouncy">DUANG</button></span></span></div>'
     +'<div class="dd-jb-msg" role="status"></div></div></div>';
@@ -425,6 +428,7 @@ function ddBuildBar(overlay,mountPoint=overlay){
     $b('[data-jb=power]').textContent=c.on?'果冻：开':'果冻：关';$b('[data-jb=power]').classList.toggle('is-active',c.on);
     bar.classList.toggle('is-off',!c.on);bar.classList.toggle('is-selecting',!!S.selecting);
     const ins={tap:c.tap,drag:c.drag,shake:c.shake};const stv=['soft','bouncy'].includes(ddCfg().jellyStrength)?ddCfg().jellyStrength:'mid';bar.querySelectorAll('[data-jb-strength]').forEach(b=>b.classList.toggle('is-active',b.dataset.jbStrength===stv));{const lab=$b('[data-jb-dd-label]');if(lab)lab.textContent={soft:'软糯',mid:'Q弹',bouncy:'DUANG'}[stv];}bar.querySelectorAll('[data-jb-in]').forEach(b=>b.classList.toggle('is-active',!!ins[b.dataset.jbIn]));
+    {const pm=ddCfg().shakeMode==='pin';bar.querySelectorAll('[data-jb-mode]').forEach(b=>b.classList.toggle('is-active',b.dataset.jbMode===(pm?'pin':'select')));const pr=$b('[data-jb-pinrow]');if(pr)pr.hidden=!pm;const pi=$b('[data-jb-pin]');if(pi&&document.activeElement!==pi){pi.value=String(Math.round(Number(ddCfg().pinFixed)||0));}const po=$b('[data-jb-pin-value]');if(po)po.textContent=Math.round(Number(ddCfg().pinFixed)||0)+'%';}
     $b('[data-jb=sel]').classList.toggle('is-active',!!S.selecting);
     $b('.dd-jb-hint').textContent=S.has?'已选区（只有选中的地方会动）':'未选区（整张图都会动）';
     $b('.dd-jb-brush').hidden=!S.selecting;bar.querySelectorAll('[data-jb-tool]').forEach(t=>{t.hidden=!S.selecting;t.classList.toggle('is-active',(S.tool||'add')===t.dataset.jbTool);});$b('[data-jb=power]').hidden=!!S.selecting;{const bi=$b('[data-jb-brush]');if(bi&&document.activeElement!==bi)bi.value=String(Math.round(ddJellyBrush()*100));}
@@ -435,6 +439,7 @@ function ddBuildBar(overlay,mountPoint=overlay){
    const syncSettings=()=>{const sel=document.querySelector('#dd-strength');if(sel)sel.value=['soft','bouncy'].includes(ddCfg().jellyStrength)?ddCfg().jellyStrength:'mid';};
    const rebind=()=>{const img=overlay.querySelector('img');ddAttachJelly(img);img?._ddJellyPrepare?.();paintBar();syncSettings();};
    bar.addEventListener('input',e=>{
+    const pn=e.target.closest('[data-jb-pin]');if(pn){ddCfg().pinFixed=Number(pn.value);ddSave();$b('[data-jb-pin-value]').textContent=pn.value+'%';return;}
     const fi=e.target.closest('[data-jb-feedback]');if(fi){ddCfg().feedbackRange=Number(fi.value);ddSave();syncFeedbackRange(fi);showFeedbackPreview(fi);return;}
     const bi=e.target.closest('[data-jb-brush]');if(!bi)return;e.stopPropagation();
     ddCfg().jellyBrush=Number(bi.value)/100;ddSave();
@@ -456,6 +461,7 @@ function ddBuildBar(overlay,mountPoint=overlay){
     if(d.jb==='power'){ddJellyCfg();c.jellyOn=!c.jellyOn;if(!c.jellyOn)S.selecting=false;ddSave();rebind();return;}
     if(d.jb==='more'){const p=$b('.dd-jb-panel');p.hidden=!p.hidden;paintBar();return;}
     if(d.jb==='sel'){ddJellyCfg();if(!c.jellyOn){c.jellyOn=true;ddSave();}S.selecting=true;S.tool='add';rebind();return;}
+    if(d.jbMode){const c2=ddCfg();c2.shakeMode=d.jbMode==='pin'?'pin':'select';if(!c2.jellyOn)c2.jellyOn=true;if(!c2.jellyShake){c2.jellyShake=true;ddSave();rebind();await ddJellyEnableMotion(setMsg);return;}ddSave();paintBar();return;}
     if(d.jbTool){S.tool=d.jbTool;paintBar();return;}
     if(d.jb==='done'){S.selecting=false;rebind();return;}
     if(d.jb==='clr'||d.jb==='clr2'){ddJellyClearSelection(img);ddPersistMask(img,S);if(d.jb==='clr')S.selecting=true;rebind();return;}
@@ -497,7 +503,7 @@ async function setPetImage(blob){
  ddBuildBar(petRoot,jellySlot||petRoot);petRoot._ddPaintBar?.();await restoreMask(petImage);petImage._ddJellyPrepare?.();petRoot._ddPaintBar?.();
 }
 const GALLERY_KEY='pet-gallery';
-const GALLERY_CFG_KEYS=['enabled','jellyOn','jellyScope','jellyTap','jellyDrag','jellyShake','jellyStrength','jellyBrush','feedbackRange','jellyMode'];
+const GALLERY_CFG_KEYS=['enabled','jellyOn','jellyScope','jellyTap','jellyDrag','jellyShake','jellyStrength','jellyBrush','feedbackRange','jellyMode','shakeMode','pinFixed'];
 async function getPetGallery(){const list=await dbGet(GALLERY_KEY);return Array.isArray(list)?list:[];}
 async function savePetToGallery(){
  if(!petImage||!petBlob)throw new Error('请先导入桌宠图片');if(petEraser)await ddSetEraser(false);
