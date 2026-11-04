@@ -43,6 +43,33 @@ async function getPetImage() {
         req.onerror = () => { db.close(); reject(req.error || new Error('读取图片失败')); };
     });
 }
+async function putAsset(key, value) {
+    const db = await openAssetDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction('assets', 'readwrite');
+        tx.objectStore('assets').put(value, key);
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror = () => { db.close(); reject(tx.error || new Error('保存选区失败')); };
+    });
+}
+async function getAsset(key) {
+    const db = await openAssetDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction('assets', 'readonly');
+        const req = tx.objectStore('assets').get(key);
+        req.onsuccess = () => { db.close(); resolve(req.result || null); };
+        req.onerror = () => { db.close(); reject(req.error || new Error('读取选区失败')); };
+    });
+}
+async function clearAsset(key) {
+    const db = await openAssetDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction('assets', 'readwrite');
+        tx.objectStore('assets').delete(key);
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror = () => { db.close(); reject(tx.error || new Error('清除选区失败')); };
+    });
+}
 async function clearPetImage() {
     const db = await openAssetDB();
     return new Promise((resolve, reject) => {
@@ -55,7 +82,7 @@ async function clearPetImage() {
 
 const BALL = '<svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lp-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f8c9d9"/><stop offset="1" stop-color="#d78eae"/></linearGradient></defs><path d="M32 5c-15 0-26 11-26 26 0 14 11 27 26 27s26-13 26-27C58 16 47 5 32 5Z" fill="url(#lp-g)"/><path d="M18 25c2-5 7-8 13-8" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" opacity=".8"/><circle cx="23" cy="34" r="2.7" fill="#765565"/><circle cx="41" cy="34" r="2.7" fill="#765565"/><path d="M28 42q4 4 8 0" fill="none" stroke="#765565" stroke-width="2.4" stroke-linecap="round"/></svg>';
 
-let pet = { image: null, url: '', gl: null, program: null, texture: null, positionBuffer: null, uvBuffer: null, indexBuffer: null, cols: 36, rows: 36, positions: null, uvs: null, indices: null, indexCount: 0, width: 0, height: 0, raf: 0, pointer: null, cx: 0, cy: 0, pullX: 0, pullY: 0, vx: 0, vy: 0 };
+let maskMode = 'paint';\nlet maskStroke = null;\nlet pet = { maskCanvas: null, maskCtx: null, maskOverlay: null, maskOverlayCtx: null, maskPixels: null, image: null, url: '', gl: null, program: null, texture: null, positionBuffer: null, uvBuffer: null, indexBuffer: null, cols: 36, rows: 36, positions: null, uvs: null, indices: null, indexCount: 0, width: 0, height: 0, raf: 0, pointer: null, cx: 0, cy: 0, pullX: 0, pullY: 0, vx: 0, vy: 0 };
 
 function shader(gl, type, source) {
     const s = gl.createShader(type);
@@ -215,13 +242,116 @@ function bindPetTouch() {
     canvas.addEventListener('pointercancel', release);
     canvas.addEventListener('lostpointercapture', release);
 }
+function prepareMaskOverlay() {
+    const overlay = document.querySelector('#lp-mask-overlay');
+    const canvas = document.querySelector('#lp-pet-canvas');
+    if (!overlay || !canvas || !pet.image) return;
+    overlay.width = canvas.width; overlay.height = canvas.height;
+    overlay.style.width = canvas.style.width; overlay.style.height = canvas.style.height;
+    overlay.style.display = 'block';
+    pet.maskOverlay = overlay; pet.maskOverlayCtx = overlay.getContext('2d');
+    paintMaskOverlay();
+}
+function refreshMaskPixels() {
+    if (!pet.maskCtx || !pet.maskCanvas) { pet.maskPixels = null; return; }
+    pet.maskPixels = pet.maskCtx.getImageData(0, 0, pet.maskCanvas.width, pet.maskCanvas.height);
+}
+function maskAtUv(u, v) {
+    if (!pet.maskPixels || !pet.maskCanvas) return 0;
+    const x = clamp(Math.round(u * (pet.maskCanvas.width - 1)), 0, pet.maskCanvas.width - 1);
+    const y = clamp(Math.round(v * (pet.maskCanvas.height - 1)), 0, pet.maskCanvas.height - 1);
+    return pet.maskPixels.data[(y * pet.maskCanvas.width + x) * 4 + 3] / 255;
+}
+function maskAtPoint(x, y) {
+    if (!pet.width || !pet.height) return 0;
+    return maskAtUv(x / pet.width, y / pet.height);
+}
+function paintMaskOverlay() {
+    if (!pet.maskOverlayCtx || !pet.maskCanvas) return;
+    const ctx = pet.maskOverlayCtx, canvas = pet.maskOverlay;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(pet.maskCanvas, 0, 0, canvas.width, canvas.height);
+    ctx.globalCompositeOperation = 'source-in';
+    ctx.fillStyle = 'rgba(238, 139, 183, .48)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.globalCompositeOperation = 'source-over';
+}
+async function savePetMask() {
+    if (!pet.maskCanvas) return;
+    const blob = await new Promise(resolve => pet.maskCanvas.toBlob(resolve, 'image/png'));
+    if (blob) await putAsset('pet-mask', blob);
+}
+async function loadPetMask() {
+    if (!pet.image) return;
+    pet.maskCanvas = document.createElement('canvas');
+    pet.maskCanvas.width = pet.image.naturalWidth;
+    pet.maskCanvas.height = pet.image.naturalHeight;
+    pet.maskCtx = pet.maskCanvas.getContext('2d', { willReadFrequently: true });
+    const saved = await getAsset('pet-mask');
+    if (saved) {
+        const url = URL.createObjectURL(saved);
+        try {
+            const bitmap = await createImageBitmap(saved);
+            pet.maskCtx.drawImage(bitmap, 0, 0, pet.maskCanvas.width, pet.maskCanvas.height);
+            bitmap.close?.();
+        } finally {}
+    }
+    refreshMaskPixels();
+    prepareMaskOverlay();
+    drawPet();
+}
+function bindMaskEditor() {
+    const overlay = document.querySelector('#lp-mask-overlay');
+    if (!overlay || overlay.dataset.bound) return;
+    overlay.dataset.bound = '1';
+    const point = e => {
+        const r = overlay.getBoundingClientRect();
+        return [(e.clientX - r.left) / r.width * pet.maskCanvas.width, (e.clientY - r.top) / r.height * pet.maskCanvas.height];
+    };
+    const stroke = (x, y) => {
+        if (!pet.maskCtx) return;
+        const size = Number(document.querySelector('#lp-mask-brush')?.value || 32);
+        const radius = Math.max(2, Math.min(pet.maskCanvas.width, pet.maskCanvas.height) * size / 100);
+        const g = pet.maskCtx.createRadialGradient(x, y, 0, x, y, radius);
+        g.addColorStop(0, 1); g.addColorStop(.68, .82); g.addColorStop(1, 0);
+        pet.maskCtx.save();
+        pet.maskCtx.globalCompositeOperation = maskMode === 'erase' ? 'destination-out' : 'source-over';
+        pet.maskCtx.fillStyle = g;
+        pet.maskCtx.beginPath(); pet.maskCtx.arc(x, y, radius, 0, Math.PI * 2); pet.maskCtx.fill();
+        pet.maskCtx.restore();
+        paintMaskOverlay();
+    };
+    overlay.addEventListener('pointerdown', e => {
+        if (!maskMode || !pet.maskCanvas) return;
+        maskStroke = { id: e.pointerId };
+        try { overlay.setPointerCapture(e.pointerId); } catch {}
+        const [x, y] = point(e); stroke(x, y); e.preventDefault();
+    });
+    overlay.addEventListener('pointermove', e => {
+        if (!maskStroke || maskStroke.id !== e.pointerId) return;
+        const [x, y] = point(e); stroke(x, y); e.preventDefault();
+    });
+    const end = async e => {
+        if (!maskStroke || (e && e.pointerId !== maskStroke.id)) return;
+        maskStroke = null;
+        refreshMaskPixels(); paintMaskOverlay(); drawPet();
+        try { await savePetMask(); } catch (err) { toast(err.message || '选区保存失败'); }
+    };
+    overlay.addEventListener('pointerup', end);
+    overlay.addEventListener('pointercancel', end);
+    overlay.addEventListener('lostpointercapture', end);
+}
 function setImage(blob) {
     return new Promise((resolve, reject) => {
         const url = URL.createObjectURL(blob), img = new Image();
         img.onload = () => {
             if (pet.url) URL.revokeObjectURL(pet.url);
             pet.url = url; pet.image = img;
-            try { prepareCanvas(); bindPetTouch(); resolve(); } catch (err) { reject(err); }
+            try {
+                prepareCanvas(); bindPetTouch();
+                await loadPetMask();
+                resolve();
+            } catch (err) { reject(err); }
         };
         img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('图片读取失败，请使用 PNG、JPG 或 WebP')); };
         img.src = url;
@@ -249,12 +379,13 @@ function mount() {
       '<section id="lp-panel" class="lp-panel" aria-hidden="true">' +
         '<header class="lp-header"><div><b>小小桌宠</b><small>摸摸它，看看会不会 DUANG</small></div><button class="lp-close" type="button" aria-label="关闭">×</button></header>' +
         '<div class="lp-stage" id="lp-stage"><div class="lp-empty" id="lp-empty"><span class="lp-empty-mark">＋</span><b>放一张 PNG 进来</b><small>建议使用透明背景的角色立绘</small><button id="lp-upload" type="button">选择图片</button></div><canvas id="lp-pet-canvas" aria-label="触摸并拖动桌宠"></canvas></div>' +
-        '<div class="lp-toolbar"><label class="lp-file-label">更换图片<input id="lp-file" type="file" accept="image/png,image/webp,image/jpeg"></label><button id="lp-reset" type="button">恢复原图</button><button id="lp-remove" type="button">移除图片</button></div>' +
+        '<div class="lp-toolbar"><label class="lp-file-label">更换图片<input id="lp-file" type="file" accept="image/png,image/webp,image/jpeg"></label><button id="lp-reset" type="button">恢复形变</button><button id="lp-remove" type="button">移除图片</button></div>' +
+        '<div class="lp-mask-tools"><span>互动选区</span><button id="lp-mask-paint" type="button" class="is-active">涂抹选区</button><button id="lp-mask-erase" type="button">擦除选区</button><button id="lp-mask-clear" type="button">清空选区</button><button id="lp-mask-preview" type="button">互动预览</button><label>选区笔刷 <input id="lp-mask-brush" type="range" min="8" max="100" value="32"><output id="lp-mask-brush-value">32</output></label></div>' +
         '<div class="lp-controls">' +
           '<label><span>笔刷范围 <output id="lp-brush-value"></output></span><input id="lp-brush" type="range" min="10" max="45" step="1"></label>' +
           '<label><span>拉扯力度 <output id="lp-strength-value"></output></span><input id="lp-strength" type="range" min="25" max="120" step="1"></label>' +
           '<label><span>边缘柔和 <output id="lp-softness-value"></output></span><input id="lp-softness" type="range" min="30" max="100" step="1"></label>' +
-          '<p>按住角色任意位置拖动，笔刷中心受力最明显，周围自然跟随；松手后会弹回原位。</p></div><div id="lp-toast" role="status" aria-live="polite"></div></section>';
+          '<p>先涂抹角色上允许互动的区域，再切换到互动预览。只有选区内可以拖动，选区外不会形变。</p></div><div id="lp-toast" role="status" aria-live="polite"></div></section>';
     document.body.append(root);
     const panel = root.querySelector('#lp-panel'), ball = root.querySelector('#lp-ball');
     const open = () => { panel.classList.add('is-open'); panel.setAttribute('aria-hidden', 'false'); ball.classList.add('is-active'); };
@@ -288,6 +419,26 @@ function mount() {
     ball.addEventListener('pointerup', ballEnd); ball.addEventListener('pointercancel', ballEnd);
     root.querySelector('.lp-close').addEventListener('click', close);
     root.querySelector('#lp-upload').addEventListener('click', () => root.querySelector('#lp-file').click());
+    const setMaskMode = mode => {
+        maskMode = mode;
+        root.querySelector('#lp-mask-paint').classList.toggle('is-active', mode === 'paint');
+        root.querySelector('#lp-mask-erase').classList.toggle('is-active', mode === 'erase');
+        root.querySelector('#lp-mask-preview').classList.toggle('is-active', mode === null);
+        const overlay = root.querySelector('#lp-mask-overlay');
+        if (overlay) overlay.style.pointerEvents = mode ? 'auto' : 'none';
+        toast(mode === 'paint' ? '涂抹要允许互动的区域' : mode === 'erase' ? '擦除不需要互动的区域' : '互动预览已开启');
+    };
+    root.querySelector('#lp-mask-paint').addEventListener('click', () => setMaskMode('paint'));
+    root.querySelector('#lp-mask-erase').addEventListener('click', () => setMaskMode('erase'));
+    root.querySelector('#lp-mask-preview').addEventListener('click', () => setMaskMode(null));
+    root.querySelector('#lp-mask-clear').addEventListener('click', async () => {
+        if (!pet.maskCtx) return;
+        pet.maskCtx.clearRect(0, 0, pet.maskCanvas.width, pet.maskCanvas.height);
+        refreshMaskPixels(); paintMaskOverlay(); await savePetMask(); drawPet(); toast('互动选区已清空');
+    });
+    const maskBrush = root.querySelector('#lp-mask-brush');
+    maskBrush.addEventListener('input', () => { root.querySelector('#lp-mask-brush-value').value = maskBrush.value; });
+    bindMaskEditor();
     root.querySelector('#lp-file').addEventListener('change', async e => {
         const file = e.target.files && e.target.files[0]; e.target.value = '';
         if (!file) return;
@@ -302,7 +453,8 @@ function mount() {
         catch (err) { toast(err.message); }
     });
     root.querySelector('#lp-remove').addEventListener('click', async () => {
-        await clearPetImage(); stopFrame(); pet.pointer = null; pet.image = null;
+        await clearPetImage(); await clearAsset('pet-mask'); stopFrame(); pet.pointer = null; pet.image = null;
+        pet.maskCanvas = pet.maskCtx = pet.maskPixels = null;
         if (pet.url) URL.revokeObjectURL(pet.url); pet.url = '';
         const canvas = root.querySelector('#lp-pet-canvas');
         canvas.width = 1; canvas.height = 1; canvas.style.width = '0'; canvas.style.height = '0'; canvas.style.display = 'none';
