@@ -2,7 +2,6 @@ import { extension_settings } from '/scripts/extensions.js';
 import { saveSettingsDebounced } from '/script.js';
 
 const EXT='littlepet';
-const defaults={enabled:true,jellyOn:true,jellyScope:'local',jellyTap:true,jellyDrag:true,jellyShake:false,jellyStrength:'mid',jellyBrush:.075,feedbackRange:100,interactionMode:'selection',fixedBottom:26};
 function ddCfg(){
  if(!extension_settings[EXT])extension_settings[EXT]={};
  const c=extension_settings[EXT];
@@ -29,7 +28,6 @@ function ddJellyCfg(){
  if(typeof c.jellyTap!=='boolean')c.jellyTap=true;
  if(typeof c.jellyDrag!=='boolean')c.jellyDrag=true;
  if(typeof c.jellyShake!=='boolean')c.jellyShake=false;
- return {on:c.jellyOn,scope:'local',tap:true,drag:c.jellyDrag,shake:c.jellyShake,mode:c.interactionMode==='icon'?'icon':'selection',fixedBottom:Math.max(0,Math.min(70,Number(c.fixedBottom??26)||0)),amp:{soft:.35,mid:.5,bouncy:.65}[c.jellyStrength]||.5};
 }
 function ddJellyBrush(){const b=Number(ddCfg().jellyBrush);return Number.isFinite(b)&&b>0?Math.max(.02,Math.min(.2,b)):.075;}
 function ddJellyState(img){
@@ -50,121 +48,12 @@ async function ddJellyEnableMotion(setMsg){
  setTimeout(()=>{window.removeEventListener('devicemotion',h);say(got?'摇晃已就绪：晃一晃手机试试':'没收到传感器数据：请确认是用 http://127.0.0.1 或 https 打开的酒馆，并且系统没有关闭动作传感器');},1500);
  return true;
 }
-function ddAttachJellyIconShake(img,conf){
- if(!img)return;
- const host=img.parentElement;if(!host)return;
- const ac=new AbortController(),sig={signal:ac.signal};img._ddJellyAbort=ac;
- const originalOpacity=img.style.opacity,originalPosition=host.style.position;
- const fixed=Math.max(0,Math.min(70,Number(ddCfg().fixedBottom??26)||0)),pin=100-fixed;
- const wrap=document.createElement('div');wrap.className='dd-icon-native-layers';
- wrap.style.cssText='position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;z-index:4;overflow:visible;';
- const one=img.cloneNode(false);one.removeAttribute('id');one.alt='';one.draggable=false;
- one.style.cssText='display:block;width:100%;height:100%;max-width:none;max-height:none;object-fit:fill;border:0;border-radius:0;pointer-events:none;';
- const bottom=document.createElement('span');bottom.className='dd-bl dd-bl-bot';
- bottom.style.clipPath='inset('+(pin-.3)+'% 0 0 0)';
- bottom.append(one.cloneNode(false));
- const top=document.createElement('span');top.className='dd-bl dd-bl-top';
- top.style.clipPath='inset(0 0 '+fixed+'% 0)';
- top.style.transformOrigin='50% '+pin+'%';
- top.append(one);
- wrap.append(bottom,top);
- const place=()=>{
-  wrap.style.left=img.offsetLeft+'px';wrap.style.top=img.offsetTop+'px';
-  wrap.style.width=img.offsetWidth+'px';wrap.style.height=img.offsetHeight+'px';
- };
- if(getComputedStyle(host).position==='static')host.style.position='relative';
- host.append(wrap);place();img.style.opacity='0';img.draggable=false;img.style.touchAction='none';
- const ro=typeof ResizeObserver!=='undefined'?new ResizeObserver(place):null;ro?.observe(img);
- img.addEventListener('load',place,sig);window.addEventListener('resize',place,sig);
- const st={r:0,vr:0,s:0,vs:0},dragState={x:[0,0,1,1,0],v:[0,0,0,0,0],t:[0,0,1,1,0]};
- let raf=0,dragRaf=0,drag=null,gx=0,gy=0,primed=false;
- const apply=()=>{
-  const shake='skewX('+(-st.r).toFixed(2)+'deg) scale('+(1-st.s*.5).toFixed(3)+','+(1+st.s).toFixed(3)+')';
-  const d=dragState.x,move='translate('+d[0].toFixed(2)+'px,'+d[1].toFixed(2)+'px) rotate('+d[4].toFixed(3)+'deg) scale('+d[2].toFixed(4)+','+d[3].toFixed(4)+')';
-  top.style.transform=shake+' '+move;
- };
- const dragTick=()=>{
-  let moving=false;
-  for(let i=0;i<5;i++){
-   if(drag&&i<4){dragState.x[i]=dragState.t[i];dragState.v[i]=0;}
-   else{dragState.v[i]+=(dragState.t[i]-dragState.x[i])*.16;dragState.v[i]*=.80;dragState.x[i]+=dragState.v[i];}
-   if(Math.abs(dragState.v[i])>.0008||Math.abs(dragState.t[i]-dragState.x[i])>.0008)moving=true;
-  }
-  apply();
-  if(moving||drag)dragRaf=requestAnimationFrame(dragTick);
-  else{dragRaf=0;dragState.x=[0,0,1,1,0];dragState.v=[0,0,0,0,0];apply();}
- };
- const kickDrag=()=>{if(!dragRaf)dragRaf=requestAnimationFrame(dragTick);};
- const restDrag=()=>{dragState.t=[0,0,1,1,0];};
- const squish=()=>{
-  const amp=ddJellyCfg().amp;dragState.x[2]=1+.11*amp;dragState.x[3]=1-.14*amp;
-  dragState.v[2]=dragState.v[3]=0;restDrag();kickDrag();
- };
- img.addEventListener('pointerdown',e=>{
-  if(e.pointerType==='mouse'&&e.button!==0)return;
-  drag={id:e.pointerId,x:e.clientX,y:e.clientY,t:Date.now(),moved:false};
-  try{img.setPointerCapture(e.pointerId);}catch{}e.preventDefault();
- },sig);
- img.addEventListener('pointermove',e=>{
-  if(!drag||e.pointerId!==drag.id)return;
-  const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
-  if(!drag.moved&&Math.hypot(dx,dy)<6)return;drag.moved=true;
-  if(!ddCfg().jellyDrag)return;
-  const w=img.clientWidth||300,h=img.clientHeight||300,damp=v=>Math.sign(v)*Math.pow(Math.abs(v),.82)*.55;
-  const amp=ddJellyCfg().amp,ax=Math.abs(dx)/w,ay=Math.abs(dy)/h;
-  dragState.t[0]=damp(dx);dragState.t[1]=damp(dy);
-  dragState.t[2]=(1+Math.min(.38,ax*.9*amp))*(1-Math.min(.38,ay*.9*amp)*.45);
-  dragState.t[3]=(1+Math.min(.38,ay*.9*amp))*(1-Math.min(.38,ax*.9*amp)*.45);
-  dragState.t[4]=Math.max(-6,Math.min(6,dx/w*5*amp));kickDrag();
- },sig);
- const dragEnd=e=>{
-  if(!drag||e.pointerId!==drag.id)return;
-  const d=drag;drag=null;try{img.releasePointerCapture(d.id);}catch{}
-  const quick=Date.now()-d.t<450&&!d.moved;
-  if(quick&&ddCfg().jellyTap){squish();return;}
-  if(d.moved&&ddCfg().jellyDrag){
-   dragState.v[2]-=(dragState.x[2]-1)*.35;dragState.v[3]-=(dragState.x[3]-1)*.35;
-  }
-  restDrag();kickDrag();
- };
- img.addEventListener('pointerup',dragEnd,sig);img.addEventListener('pointercancel',dragEnd,sig);
- img.addEventListener('contextmenu',e=>{if(drag)e.preventDefault();},sig);
- // 直接移植原版 ddStartBallShake 的弹簧与传感器冲量公式，只把目标图层限定为当前桌宠。
- const tick=()=>{
-  st.vr+=-st.r*.1;st.vr*=.9;st.r+=st.vr;
-  st.vs+=-st.s*.14;st.vs*=.86;st.s+=st.vs;
-  const live=Math.abs(st.r)+Math.abs(st.vr)+Math.abs(st.s*30)+Math.abs(st.vs*30)>.08;
-  apply();raf=live?requestAnimationFrame(tick):0;
- };
- window.addEventListener('devicemotion',e=>{
-  if(!ddCfg().jellyShake||!document.contains(img))return;
-  let ax=0,ay=0;const a=e.acceleration;
-  if(a&&(a.x!=null||a.y!=null)){ax=a.x||0;ay=a.y||0;}
-  else{
-   const g=e.accelerationIncludingGravity||{},vx=g.x||0,vy=g.y||0;
-   if(!primed){gx=vx;gy=vy;primed=true;}
-   gx=gx*.9+vx*.1;gy=gy*.9+vy*.1;ax=vx-gx;ay=vy-gy;
-  }
-  if(Math.abs(ax)+Math.abs(ay)<1.2)return;
-  const k=ddJellyCfg().amp/.5,cl=(v,m)=>Math.max(-m,Math.min(m,v));
-  st.vr+=cl(-ax*.45*k,5*k);st.vs+=cl(ay*.012*k,.05*k);
-  st.r=cl(st.r,20);st.s=cl(st.s,.25);
-  if(!raf)raf=requestAnimationFrame(tick);
- },sig);
- const cleanup=()=>{
-  if(raf)cancelAnimationFrame(raf);if(dragRaf)cancelAnimationFrame(dragRaf);
-  raf=dragRaf=0;ro?.disconnect();wrap.remove();
-  img.style.opacity=originalOpacity;host.style.position=originalPosition;img.style.touchAction='';
- };
- ac.signal.addEventListener('abort',cleanup,{once:true});img._ddJellyRehost=place;
-}
 function ddAttachJelly(img){
  if(!img)return;
  const S=ddJellyState(img),conf=ddJellyCfg(),amp=conf.amp,scope=conf.scope;
  img._ddJellyAbort?.abort();img._ddJellyAbort=null;
  img.style.transform='';img.style.touchAction='';img.style.willChange='';
  if(!conf.on){S.selecting=false;return;}
- if(ddCfg().interactionMode==='icon'){ddAttachJellyIconShake(img,conf);return;}
  if(scope==='whole'&&!S.has&&!conf.shake&&!S.selecting)return ddAttachJellyWhole(img,conf);
  let probeOk=false;
  try{const pc=document.createElement('canvas');probeOk=!!(pc.getContext('webgl')||pc.getContext('experimental-webgl'));}catch{}
@@ -178,7 +67,6 @@ function ddAttachJelly(img){
  const dep={x:0,v:0,t:0,k:.3,d:.6},ox={x:0,v:0,t:0,k:.3,d:.7},oy={x:0,v:0,t:0,k:.3,d:.7};
  const aff={x:[0,0,1,1,0],v:[0,0,0,0,0],t:[0,0,1,1,0]};
  const shk={x:0,y:0,vx:0,vy:0};
- const iconWobble={r:0,vr:0,s:0,vs:0};
  const destroy=()=>{cancelAnimationFrame(raf);raf=0;img.style.visibility=originalVisibility;try{canvas?.remove();}catch{}try{selCv?.remove();}catch{}canvas=null;selCv=null;gl=null;};
  ac.signal.addEventListener('abort',destroy);
  const box=()=>{
@@ -197,18 +85,10 @@ function ddAttachJelly(img){
  };
  const rebuildWeights=()=>{
   if(!mv)return;
-  const iconMode=ddCfg().interactionMode==='icon',fixed=Math.max(0,Math.min(70,Number(ddCfg().fixedBottom??26)||0))/100,boundary=1-fixed,band=Math.max(.012,1/Math.max(16,rows));
   for(let j=0;j<=rows;j++)for(let i=0;i<=cols;i++){
    const k=j*(cols+1)+i,u=i/cols,v=j/rows;
-   if(iconMode){
-    // Duang 图标模式：底部比例完全固定，上方区域可形变；过渡只发生在固定线以上。
-    // 与原版 ddBallHtml 的上下双图层一致：固定线以上整体变换，以下完全静止，不做渐变权重。
-    const w=v<=boundary?1:0;
-    mv[k]=w;shw[k]=w;
-   }else{
-    mv[k]=S.has?maskAt(u,v):1;
-    shw[k]=S.has?mv[k]:Math.pow(Math.sin(Math.PI*u),.6)*Math.pow(Math.sin(Math.PI*v),.6);
-   }
+   mv[k]=S.has?maskAt(u,v):1;
+   shw[k]=S.has?mv[k]:Math.pow(Math.sin(Math.PI*u),.6)*Math.pow(Math.sin(Math.PI*v),.6);
   }
  };
  // 选区显示层：低分辨率画布放大，边缘自带柔化
@@ -322,18 +202,8 @@ function ddAttachJelly(img){
     const k=j*(cols+1)+i,px=baseX[k],py=baseY[k],m1=mv[k];let x=px,y=py;
     if(useLocal){const dx=px-cx,dy=py-cy,d2=dx*dx+dy*dy,w=Math.exp(-d2/RR)*m1,w2=Math.exp(-d2/RR2)*m1,f=1-dep.x*w;x=cx+dx*f+ox.x*w2+ofx[k];y=cy+dy*f+oy.x*w2+ofy[k];}
     if(useAff){const dxc=px-mx0,dyc=py-my0,X=mx0+tx+(dxc*cr-dyc*sr)*sx,Y=my0+ty+(dxc*sr+dyc*cr)*sy;x=px+(X-px)*m1;y=py+(Y-py)*m1;}
-    if(ddCfg().interactionMode==='icon'){
-     // 复刻 Duang 原版：底层保持原位，上层以底边中点为轴 skewX + scaleY。
-     const fixed=Math.max(0,Math.min(70,Number(ddCfg().fixedBottom??26)||0))/100,pivotY=boxH*(1-fixed),w=mv[k];
-     if(w>0){const dx=x-boxW/2,dy=y-pivotY,rad=(-iconWobble.r)*Math.PI/180,sx=1-iconWobble.s*.5,sy=1+iconWobble.s;
-      // CSS: skewX(angle) scale(sx, sy)，按原版变换矩阵顺序计算。
-      const tx=dx*sx+Math.tan(rad)*dy*sy,ty=dy*sy;
-      x=boxW/2+(tx-dx)*w+dx;y=pivotY+(ty-dy)*w+dy;
-     }
-    }else if(shOn){const q=shw[k];x+=shk.x*shAmp*q*(1+.6*(py/boxH-.5));y+=shk.y*shAmp*q*(1+.4*(px/boxW-.5));}
-    // 原版上层允许越过固定线；只由 WebGL 画布边界裁切，不把顶点提前钳回图片矩形。
-    const iconMode=ddCfg().interactionMode==='icon';
-    pos[k*2]=iconMode?x:Math.max(0,Math.min(boxW,x));pos[k*2+1]=iconMode?y:Math.max(0,Math.min(boxH,y));
+     if(shOn){const q=shw[k];x+=shk.x*shAmp*q*(1+.6*(py/boxH-.5));y+=shk.y*shAmp*q*(1+.4*(px/boxW-.5));}
+     pos[k*2]=Math.max(0,Math.min(boxW,x));pos[k*2+1]=Math.max(0,Math.min(boxH,y));
    }
    gl.bufferSubData(gl.ARRAY_BUFFER,0,pos);
   }
@@ -344,7 +214,6 @@ function ddAttachJelly(img){
  };
  const step=s=>{s.v+=(s.t-s.x)*s.k;s.v*=s.d;s.x+=s.v;return Math.abs(s.v)>.002||Math.abs(s.t-s.x)>.002;};
  const resetAll=()=>{
-  dep.x=dep.v=ox.x=ox.v=oy.x=oy.v=0;aff.x=[0,0,1,1,0];aff.v=[0,0,0,0,0];aff.t=[0,0,1,1,0];shk.x=shk.y=shk.vx=shk.vy=0;iconWobble.r=iconWobble.vr=iconWobble.s=iconWobble.vs=0;
   if(ofx){ofx.fill(0);ofy.fill(0);ovx.fill(0);ovy.fill(0);}
  };
  const K=.16,D=.80;
@@ -359,10 +228,6 @@ function ddAttachJelly(img){
   }
   shk.vx+=-shk.x*.1;shk.vx*=.9;shk.x+=shk.vx;shk.vy+=-shk.y*.1;shk.vy*=.9;shk.y+=shk.vy;
   if(Math.abs(shk.x)>.002||Math.abs(shk.vx)>.002||Math.abs(shk.y)>.002||Math.abs(shk.vy)>.002)live=true;
-  // Duang 原版图标弹簧：角度与纵向挤压分别回弹。
-  iconWobble.vr+=-iconWobble.r*.1;iconWobble.vr*=.9;iconWobble.r+=iconWobble.vr;
-  iconWobble.vs+=-iconWobble.s*.14;iconWobble.vs*=.86;iconWobble.s+=iconWobble.vs;
-  if(Math.abs(iconWobble.r)+Math.abs(iconWobble.vr)+Math.abs(iconWobble.s*30)+Math.abs(iconWobble.vs*30)>.08)live=true;
   if(ofx){for(let k=0;k<ofx.length;k++){if(!press||!press.smudging){ovx[k]+=(0-ofx[k])*.12;ovy[k]+=(0-ofy[k])*.12;ovx[k]*=.8;ovy[k]*=.8;ofx[k]+=ovx[k];ofy[k]+=ovy[k];}if(Math.abs(ofx[k])>.02||Math.abs(ofy[k])>.02||Math.abs(ovx[k])>.01||Math.abs(ovy[k])>.01)live=true;}}
   draw();
   if(live||(press&&!press.paint))raf=requestAnimationFrame(tick);
@@ -457,16 +322,9 @@ function ddAttachJelly(img){
    if(Math.abs(ax)+Math.abs(ay)<1.2)return;
    if(!ensure())return;
    show();
-   if(ddCfg().interactionMode==='icon'){
-    // 直接采用原版 ddStartBallShake 的受力方向、力度上限与弹簧输入。
-    const k=ddJellyCfg().amp/.5,cl=(v,m)=>Math.max(-m,Math.min(m,v));
-    iconWobble.vr+=cl(-ax*.45*k,5*k);iconWobble.vs+=cl(ay*.012*k,.05*k);
-    iconWobble.r=cl(iconWobble.r,20);iconWobble.s=cl(iconWobble.s,.25);
-   }else{
     shk.vx+=Math.max(-1.2,Math.min(1.2,-ax*.025*amp));shk.vy+=Math.max(-1.2,Math.min(1.2,ay*.025*amp));
     shk.x=Math.max(-1.6,Math.min(1.6,shk.x));shk.y=Math.max(-1.6,Math.min(1.6,shk.y));
-   }
-   kick();
+    kick();
   },sig);
  }
  img._ddJellyRehost=()=>{
@@ -547,8 +405,6 @@ function ddBuildBar(overlay,mountPoint=overlay){
    // 放大图下方的果冻面板：范围 / 选区 / 交互，不用回设置页。
    const bar=document.createElement('div');bar.className='dd-jelly-bar';bar.setAttribute('role','group');bar.setAttribute('aria-label','果冻互动');
    bar.innerHTML='<div class="dd-jb-head"><button type="button" data-jb="power"></button><button type="button" data-jb="more">设置 ▴</button><button type="button" data-jb-tool="add" aria-label="增加选区（画笔）" title="增加选区" hidden><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20l1-4L16.5 4.5a2 2 0 0 1 3 3L8 19z"/><path d="M14 7l3 3"/></svg></button><button type="button" data-jb-tool="erase" aria-label="擦除选区（橡皮）" title="擦除选区" hidden><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 20h12"/><path d="M5 15l8-8a2 2 0 0 1 3 0l3 3a2 2 0 0 1 0 3l-6 6H9z"/><path d="M9 11l6 6"/></svg></button><button type="button" data-jb="clr" aria-label="清除全部选区" title="清除全部选区" hidden><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg></button><button type="button" data-jb="done" aria-label="完成选区" title="完成" hidden><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg></button><label class="dd-jb-brush" hidden title="画笔粗细"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"/></svg><input type="range" min="2" max="20" step="1" data-jb-brush aria-label="画笔粗细"></label></div>'
-    +'<div class="dd-jb-panel" hidden><div class="dd-jb-row"><b>模式</b><button type="button" data-jb-mode="selection">选区模式</button><button type="button" data-jb-mode="icon">Duang 图标模式</button></div>' 
-    +'<div class="dd-jb-row" data-jb-fixed-row hidden><b>底部固定</b><label class="dd-jb-fixed"><input type="range" min="0" max="70" step="2" data-jb-fixed aria-label="底部固定比例"><output data-jb-fixed-value>26%</output></label><em class="dd-jb-hint" data-jb-icon-hint>底部保持不动，上方可拉扯和摇晃；形变可以越过固定线</em></div>'
     +'<div class="dd-jb-row" data-jb-selection-row><b>选区</b><button type="button" data-jb="sel">✎ 涂选区</button><button type="button" data-jb="clr2">清除</button><em class="dd-jb-hint"></em></div>'
     +'<div class="dd-jb-row"><b>反馈</b><label class="dd-jb-feedback"><input type="range" min="10" max="250" step="5" data-jb-feedback aria-label="反馈范围"><output data-jb-feedback-value>100%</output></label></div>'
     +'<div class="dd-jb-row"><b>交互</b><button type="button" data-jb-in="drag">拖动</button><button type="button" data-jb-in="shake">摇晃</button>'
@@ -558,17 +414,14 @@ function ddBuildBar(overlay,mountPoint=overlay){
    const setMsg=t=>{$b('.dd-jb-msg').textContent=t||'';};
    const feedbackInput=$b('[data-jb-feedback]');const syncFeedbackRange=input=>{if(!input)return;$b('[data-jb-feedback-value]').textContent=input.value+'%';};const showFeedbackPreview=(input)=>{const img=overlay.querySelector('img');if(!img)return;const host=img.parentElement;if(!host)return;let ring=host.querySelector('.dd-jb-feedback-ring');if(!ring){ring=document.createElement('div');ring.className='dd-jb-feedback-ring';host.append(ring);}const feedback=Math.max(.1,Math.min(2.5,Number(input.value||100)/100));const diameter=.34*Math.min(img.clientWidth,img.clientHeight)*feedback;ring.style.width=diameter+'px';ring.style.height=diameter+'px';ring.hidden=false;};const hideFeedbackPreview=()=>{const ring=overlay.querySelector('.dd-jb-feedback-ring');if(ring)ring.hidden=true;};if(feedbackInput){feedbackInput.value=String(ddCfg().feedbackRange||100);syncFeedbackRange(feedbackInput);}
    const paintBar=()=>{
-    const c=ddJellyCfg(),img=overlay.querySelector('img'),S=img?ddJellyState(img):{has:false,selecting:false},mode=ddCfg().interactionMode==='icon'?'icon':'selection',fixed=Math.max(0,Math.min(70,Number(ddCfg().fixedBottom??26)||0));
-    bar.querySelectorAll('[data-jb-mode]').forEach(b=>b.classList.toggle('is-active',b.dataset.jbMode===mode));
-    $b('[data-jb-fixed-row]').hidden=mode!=='icon';$b('[data-jb-selection-row]').hidden=mode!=='selection';
-    $b('[data-jb-fixed]').value=String(fixed);$b('[data-jb-fixed-value]').textContent=fixed+'%';
+     const c=ddJellyCfg(),img=overlay.querySelector('img'),S=img?ddJellyState(img):{has:false,selecting:false};
     $b('[data-jb=power]').textContent=c.on?'果冻：开':'果冻：关';$b('[data-jb=power]').classList.toggle('is-active',c.on);
     bar.classList.toggle('is-off',!c.on);bar.classList.toggle('is-selecting',!!S.selecting);
     const ins={tap:c.tap,drag:c.drag,shake:c.shake};const stv=['soft','bouncy'].includes(ddCfg().jellyStrength)?ddCfg().jellyStrength:'mid';bar.querySelectorAll('[data-jb-strength]').forEach(b=>b.classList.toggle('is-active',b.dataset.jbStrength===stv));{const lab=$b('[data-jb-dd-label]');if(lab)lab.textContent={soft:'软糯',mid:'Q弹',bouncy:'DUANG'}[stv];}bar.querySelectorAll('[data-jb-in]').forEach(b=>b.classList.toggle('is-active',!!ins[b.dataset.jbIn]));
     $b('[data-jb=sel]').classList.toggle('is-active',!!S.selecting);
     $b('.dd-jb-hint').textContent=S.has?'已选区（只有选中的地方会动）':'未选区（整张图都会动）';
-    $b('.dd-jb-brush').hidden=!S.selecting||mode!=='selection';bar.querySelectorAll('[data-jb-tool]').forEach(t=>{t.hidden=!S.selecting||mode!=='selection';t.classList.toggle('is-active',(S.tool||'add')===t.dataset.jbTool);});$b('[data-jb=power]').hidden=!!S.selecting;{const bi=$b('[data-jb-brush]');if(bi&&document.activeElement!==bi)bi.value=String(Math.round(ddJellyBrush()*100));}
-    $b('[data-jb=done]').hidden=!S.selecting||mode!=='selection';$b('[data-jb=clr]').hidden=!S.selecting||mode!=='selection';$b('[data-jb=more]').hidden=!!S.selecting;
+    $b('.dd-jb-brush').hidden=!S.selecting;bar.querySelectorAll('[data-jb-tool]').forEach(t=>{t.hidden=!S.selecting;t.classList.toggle('is-active',(S.tool||'add')===t.dataset.jbTool);});$b('[data-jb=power]').hidden=!!S.selecting;{const bi=$b('[data-jb-brush]');if(bi&&document.activeElement!==bi)bi.value=String(Math.round(ddJellyBrush()*100));}
+    $b('[data-jb=done]').hidden=!S.selecting;$b('[data-jb=clr]').hidden=!S.selecting;$b('[data-jb=more]').hidden=!!S.selecting;
     if(S.selecting)$b('.dd-jb-panel').hidden=true;
     $b('[data-jb=more]').textContent=$b('.dd-jb-panel').hidden?'设置 ▴':'收起 ▾';
    };
@@ -576,7 +429,6 @@ function ddBuildBar(overlay,mountPoint=overlay){
    const rebind=()=>{const img=overlay.querySelector('img');ddAttachJelly(img);img?._ddJellyPrepare?.();paintBar();syncSettings();};
    bar.addEventListener('input',e=>{
     const fi=e.target.closest('[data-jb-feedback]');if(fi){ddCfg().feedbackRange=Number(fi.value);ddSave();syncFeedbackRange(fi);showFeedbackPreview(fi);return;}
-    const fixed=e.target.closest('[data-jb-fixed]');if(fixed){$b('[data-jb-fixed-value]').textContent=fixed.value+'%';return;}
     const bi=e.target.closest('[data-jb-brush]');if(!bi)return;e.stopPropagation();
     ddCfg().jellyBrush=Number(bi.value)/100;ddSave();
     // 临时画一个圈让你看到当前粗细
@@ -586,7 +438,7 @@ function ddBuildBar(overlay,mountPoint=overlay){
     ring.style.cssText='position:absolute;pointer-events:none;z-index:4;border-radius:50%;border:2px solid #ff4081;background:rgba(255,64,129,.25);width:'+d+'px;height:'+d+'px;left:'+(img.offsetLeft+img.clientWidth/2-d/2)+'px;top:'+(img.offsetTop+img.clientHeight/2-d/2)+'px';
     clearTimeout(ring._t);ring._t=setTimeout(()=>ring.remove(),800);
    });
-   bar.addEventListener('change',e=>{if(e.target.closest('[data-jb-feedback]'))hideFeedbackPreview();const fixed=e.target.closest('[data-jb-fixed]');if(fixed){ddCfg().fixedBottom=Number(fixed.value);ddSave();rebind();}});
+    bar.addEventListener('change',e=>{if(e.target.closest('[data-jb-feedback]'))hideFeedbackPreview();});
    bar.addEventListener('pointerup',e=>{if(e.target.closest('[data-jb-feedback]'))hideFeedbackPreview();});
    bar.addEventListener('pointercancel',e=>{if(e.target.closest('[data-jb-feedback]'))hideFeedbackPreview();});
    bar.addEventListener('touchend',e=>{if(e.target.closest('[data-jb-feedback]'))hideFeedbackPreview();},{passive:true});
@@ -594,7 +446,6 @@ function ddBuildBar(overlay,mountPoint=overlay){
    bar.addEventListener('click',async e=>{
     const b=e.target.closest('button');if(!b)return;e.preventDefault();e.stopPropagation();
     const c=ddCfg(),img=overlay.querySelector('img'),S=ddJellyState(img),d=b.dataset;
-    if(d.jbMode){c.interactionMode=d.jbMode;S.selecting=false;ddSave();rebind();return;}
     if(d.jb==='power'){ddJellyCfg();c.jellyOn=!c.jellyOn;if(!c.jellyOn)S.selecting=false;ddSave();rebind();return;}
     if(d.jb==='more'){const p=$b('.dd-jb-panel');p.hidden=!p.hidden;paintBar();return;}
     if(d.jb==='sel'){ddJellyCfg();if(!c.jellyOn){c.jellyOn=true;ddSave();}S.selecting=true;S.tool='add';rebind();return;}
