@@ -53,7 +53,7 @@ async function ddJellyEnableMotion(setMsg){
 function ddAttachJellyIconShake(img,conf){
  const host=img.parentElement;if(!host)return;
  const ac=new AbortController(),sig={signal:ac.signal};img._ddJellyAbort=ac;
- const originalVisibility=img.style.visibility,originalPosition=host.style.position;
+ const originalOpacity=img.style.opacity,originalPosition=host.style.position;
  const fixed=Math.max(0,Math.min(70,Number(ddCfg().fixedBottom??26)||0)),pin=100-fixed;
  const wrap=document.createElement('div');wrap.className='dd-icon-native-layers';wrap.style.cssText='position:absolute;pointer-events:none;z-index:4;overflow:visible;';
  const makeLayer=(cls,clip)=>{
@@ -67,7 +67,7 @@ function ddAttachJellyIconShake(img,conf){
  const top=makeLayer('dd-bl-top','inset(0 0 '+fixed+'% 0)');top.style.transformOrigin='50% '+pin+'%';
  const place=()=>{wrap.style.left=img.offsetLeft+'px';wrap.style.top=img.offsetTop+'px';wrap.style.width=img.offsetWidth+'px';wrap.style.height=img.offsetHeight+'px';};
  if(getComputedStyle(host).position==='static')host.style.position='relative';
- host.append(wrap);place();img.style.visibility='hidden';
+ host.append(wrap);place();img.style.opacity='0';
  const ro=typeof ResizeObserver!=='undefined'?new ResizeObserver(place):null;ro?.observe(img);
  window.addEventListener('resize',place,sig);
  const st={r:0,vr:0,s:0,vs:0},dragState={x:[0,0,1,1,0],v:[0,0,0,0,0],t:[0,0,1,1,0]};let raf=0,dragRaf=0,drag=null,gx=0,gy=0,primed=false;
@@ -134,7 +134,7 @@ function ddAttachJellyIconShake(img,conf){
   st.vr+=cl(-ax*.45*k,5*k);st.vs+=cl(ay*.012*k,.05*k);st.r=cl(st.r,20);st.s=cl(st.s,.25);
   if(!raf)raf=requestAnimationFrame(tick);
  },sig);
- const cleanup=()=>{if(raf)cancelAnimationFrame(raf);if(dragRaf)cancelAnimationFrame(dragRaf);raf=dragRaf=0;ro?.disconnect();wrap.remove();img.style.visibility=originalVisibility;host.style.position=originalPosition;img.style.touchAction='';};
+ const cleanup=()=>{if(raf)cancelAnimationFrame(raf);if(dragRaf)cancelAnimationFrame(dragRaf);raf=dragRaf=0;ro?.disconnect();wrap.remove();img.style.opacity=originalOpacity;host.style.position=originalPosition;img.style.touchAction='';};
  ac.signal.addEventListener('abort',cleanup,{once:true});img._ddJellyRehost=place;
 }
 function ddAttachJelly(img){
