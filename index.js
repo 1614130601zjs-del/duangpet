@@ -361,7 +361,7 @@ function ddAttachJellyWhole(img,conf){
  img.addEventListener('pointerup',end,sig);img.addEventListener('pointercancel',end,sig);
  img.addEventListener('contextmenu',e=>{if(drag)e.preventDefault();},sig);
 }
-function ddBuildBar(overlay){
+function ddBuildBar(overlay,mountPoint=overlay){
 
    // 放大图下方的果冻面板：范围 / 选区 / 交互，不用回设置页。
    const bar=document.createElement('div');bar.className='dd-jelly-bar';bar.setAttribute('role','group');bar.setAttribute('aria-label','果冻互动');
@@ -420,9 +420,9 @@ function ddBuildBar(overlay){
      rebind();
     }
    });
-   overlay._ddPaintBar=paintBar;overlay._ddMsg=setMsg;overlay.append(bar);
+   overlay._ddPaintBar=paintBar;overlay._ddMsg=setMsg;mountPoint.append(bar);
   
- return overlay.querySelector('.dd-jelly-bar');
+ return bar;
 }
 
 // ===== 放大弹窗 =====
@@ -447,12 +447,12 @@ async function setPetImage(blob){
  if(!blob)return;detachPet();await dbPut('pet-image',blob);if(petUrl)URL.revokeObjectURL(petUrl);petUrl=URL.createObjectURL(blob);
  const made=makePetRoot(petUrl);petRoot=made.root;petImage=made.img;const stage=document.querySelector('#lp-stage');stage.replaceChildren(petRoot);
  await new Promise((resolve,reject)=>{petImage.onload=resolve;petImage.onerror=()=>reject(new Error('图片载入失败'));});
- ddBuildBar(petRoot);petRoot._ddPaintBar?.();await restoreMask(petImage);petRoot._ddPaintBar?.();document.querySelector('#lp-empty').hidden=true;
+ ddBuildBar(petRoot,document.querySelector('#lp-jelly-slot'));petRoot._ddPaintBar?.();await restoreMask(petImage);petRoot._ddPaintBar?.();document.querySelector('#lp-empty').hidden=true;
 }
 function mount(){
  if(document.querySelector('#little-pet-root'))return;
  const root=document.createElement('div');root.id='little-pet-root';
- root.innerHTML='<button id="lp-ball" class="lp-ball" type="button" aria-label="打开小小桌宠">'+BALL+'</button><section id="lp-panel" class="lp-panel" aria-hidden="true"><header class="lp-header"><div><b>小小桌宠</b><small>摸摸它，看看会不会 DUANG</small></div><button class="lp-close" type="button">×</button></header><div id="lp-stage" class="lp-stage"><div id="lp-empty" class="lp-empty"><b>放一张图片进来</b><small>支持 PNG、WebP、JPG，建议透明背景立绘</small><button id="lp-upload" type="button">选择图片</button></div></div><div class="lp-toolbar"><label>更换图片<input id="lp-file" type="file" accept="image/png,image/webp,image/jpeg"></label><button id="lp-reset" type="button">恢复互动状态</button><button id="lp-release" type="button">放出桌宠</button><button id="lp-remove" type="button">移除图片</button></div><div id="lp-toast" role="status"></div></section>';
+ root.innerHTML='<button id="lp-ball" class="lp-ball" type="button" aria-label="打开小小桌宠">'+BALL+'</button><section id="lp-panel" class="lp-panel" aria-hidden="true"><header class="lp-header"><div><b>小小桌宠</b><small>摸摸它，看看会不会 DUANG</small></div><button class="lp-close" type="button">×</button></header><div class="lp-image-actions" aria-label="图片操作"><button id="lp-change-image" class="lp-icon-button" type="button" aria-label="更换图片" title="更换图片"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m21 15-5-5L5 20M15 4l5 5"/></svg></button><button id="lp-remove-image" class="lp-icon-button is-danger" type="button" aria-label="移除图片" title="移除图片"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m4 4v6m6-6v6"/></svg></button><input id="lp-file" type="file" accept="image/png,image/webp,image/jpeg" hidden></div><div id="lp-stage" class="lp-stage"><div id="lp-empty" class="lp-empty"><b>放一张图片进来</b><small>支持 PNG、WebP、JPG，建议透明背景立绘</small><button id="lp-upload" type="button">选择图片</button></div></div><div id="lp-controls" class="lp-controls"><div id="lp-jelly-slot" class="lp-jelly-slot"></div><div class="lp-toolbar"><button id="lp-reset" type="button">恢复互动状态</button><button id="lp-release" type="button">放出桌宠</button></div></div><div id="lp-toast" role="status"></div></section>';
  document.body.append(root);
  const panel=root.querySelector('#lp-panel'),ball=root.querySelector('#lp-ball');
  // 将操作面板直接挂到 body，脱离酒馆可能带有 transform 的扩展容器，避免 fixed 定位偏移。
@@ -465,10 +465,11 @@ function mount(){
  ball.addEventListener('pointerup',end);ball.addEventListener('pointercancel',end);
  panel.querySelector('.lp-close').addEventListener('click',close);
  panel.querySelector('#lp-upload').addEventListener('click',()=>panel.querySelector('#lp-file').click());
+ panel.querySelector('#lp-change-image').addEventListener('click',()=>panel.querySelector('#lp-file').click());
  panel.querySelector('#lp-file').addEventListener('change',async e=>{const f=e.target.files?.[0];e.target.value='';if(!f)return;try{await setPetImage(f);toast('图片已保存');}catch(err){toast(err.message||'图片载入失败');}});
  panel.querySelector('#lp-release').addEventListener('click',()=>{if(!petRoot||!petImage)return toast('请先选择桌宠图片');if(petFloat)return;const f=document.createElement('div');f.id='lp-float';const h=document.createElement('div');h.className='lp-float-handle';h.textContent='小小桌宠';const b=document.createElement('button');b.type='button';b.textContent='收起';h.append(b);f.append(h);document.body.append(f);petFloat=f;f.append(petRoot);b.addEventListener('click',()=>{document.querySelector('#lp-stage').append(petRoot);f.remove();petFloat=null;ddAttachJelly(petImage);petRoot._ddPaintBar?.();});let d=null;h.addEventListener('pointerdown',e=>{if(e.target===b)return;const r=f.getBoundingClientRect();d={id:e.pointerId,x:e.clientX-r.left,y:e.clientY-r.top};h.setPointerCapture(e.pointerId);});h.addEventListener('pointermove',e=>{if(!d||d.id!==e.pointerId)return;f.style.left=clamp(e.clientX-d.x,0,innerWidth-f.offsetWidth)+'px';f.style.top=clamp(e.clientY-d.y,0,innerHeight-f.offsetHeight)+'px';});const end=e=>{if(d&&d.id===e.pointerId)d=null;};h.addEventListener('pointerup',end);h.addEventListener('pointercancel',end);f.style.left=Math.max(8,innerWidth-f.offsetWidth-24)+'px';f.style.top=Math.max(8,innerHeight-f.offsetHeight-100)+'px';ddAttachJelly(petImage);petRoot._ddPaintBar?.();});
  panel.querySelector('#lp-reset').addEventListener('click',()=>{if(!petImage)return;petImage._ddJellyAbort?.abort();ddJellyClearSelection(petImage);ddPersistMask(petImage,ddJellyState(petImage));ddAttachJelly(petImage);toast('互动状态已复位');});
- panel.querySelector('#lp-remove').addEventListener('click',async()=>{detachPet();await dbDelete('pet-image');await dbDelete('pet-mask');const stage=panel.querySelector('#lp-stage');stage.replaceChildren(panel.querySelector('#lp-empty'));panel.querySelector('#lp-empty').hidden=false;toast('图片已移除');});
+ panel.querySelector('#lp-remove-image').addEventListener('click',async()=>{detachPet();await dbDelete('pet-image');await dbDelete('pet-mask');const stage=panel.querySelector('#lp-stage');stage.replaceChildren(panel.querySelector('#lp-empty'));panel.querySelector('#lp-empty').hidden=false;panel.querySelector('#lp-jelly-slot').replaceChildren();toast('图片已移除');});
  placeBall();window.addEventListener('resize',placeBall);
  dbGet('pet-image').then(blob=>{if(blob)setPetImage(blob).catch(e=>toast(e.message));}).catch(e=>console.warn('[小小桌宠] 恢复图片失败',e));
 }
