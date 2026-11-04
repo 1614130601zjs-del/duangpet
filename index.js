@@ -29,7 +29,7 @@ function ddJellyCfg(){
  if(typeof c.jellyTap!=='boolean')c.jellyTap=true;
  if(typeof c.jellyDrag!=='boolean')c.jellyDrag=true;
  if(typeof c.jellyShake!=='boolean')c.jellyShake=false;
- return {on:c.jellyOn,scope:'local',tap:false,drag:c.jellyDrag,shake:c.jellyShake,amp:{soft:.35,mid:.5,bouncy:.65}[c.jellyStrength]||.5};
+ return {on:c.jellyOn,scope:'local',tap:c.jellyTap,drag:c.jellyDrag,shake:c.jellyShake,amp:{soft:.35,mid:.5,bouncy:.65}[c.jellyStrength]||.5};
 }
 function ddJellyBrush(){const b=Number(ddCfg().jellyBrush);return Number.isFinite(b)&&b>0?Math.max(.02,Math.min(.2,b)):.075;}
 function ddJellyState(img){
@@ -156,6 +156,8 @@ function ddAttachJelly(img){
    return true;
   }catch(e){failed=true;destroy();console.warn('[小小桌宠] 局部互动不可用，改用整图弹动',e);return false;}
  };
+ // 图片载入后预热 WebGL、纹理与网格，避免把初始化成本压在第一次触摸上。
+ img._ddJellyPrepare=()=>ensure();
  const draw=()=>{
   const m=Math.min(boxW,boxH),feedback=Math.max(.1,Math.min(2.5,Number(ddCfg().feedbackRange||100)/100)),R=.17*m*feedback,R2=.22*m*feedback,RR=R*R,RR2=R2*R2,shAmp=.05*m*amp;
   const useLocal=scope!=='whole',useAff=scope==='whole';
@@ -299,6 +301,14 @@ function ddAttachJelly(img){
    kick();
   },sig);
  }
+ img._ddJellyRehost=()=>{
+  const host=img.offsetParent||img.parentElement;
+  if(!host)return false;
+  if(canvas&&canvas.parentElement!==host)host.appendChild(canvas);
+  if(selCv&&selCv.parentElement!==host)host.appendChild(selCv);
+  if(canvas){const bx=box();placeOverlays(bx);}
+  return true;
+ };
 }
 function ddAttachJellyWhole(img,conf){
  if(!img)return;
@@ -450,7 +460,7 @@ async function setPetImage(blob){
  if(!blob)return;detachPet();await dbPut('pet-image',blob);if(petUrl)URL.revokeObjectURL(petUrl);petUrl=URL.createObjectURL(blob);
  const made=makePetRoot(petUrl);petRoot=made.root;petImage=made.img;const stage=document.querySelector('#lp-stage');stage.replaceChildren(petRoot);
  await new Promise((resolve,reject)=>{petImage.onload=resolve;petImage.onerror=()=>reject(new Error('图片载入失败'));});
- ddBuildBar(petRoot,document.querySelector('#lp-jelly-slot'));petRoot._ddPaintBar?.();await restoreMask(petImage);petRoot._ddPaintBar?.();document.querySelector('#lp-empty').hidden=true;
+ ddBuildBar(petRoot,document.querySelector('#lp-jelly-slot'));petRoot._ddPaintBar?.();await restoreMask(petImage);petImage._ddJellyPrepare?.();petRoot._ddPaintBar?.();document.querySelector('#lp-empty').hidden=true;
 }
 function mount(){
  if(document.querySelector('#little-pet-root'))return;
@@ -461,8 +471,8 @@ function mount(){
  // 将操作面板直接挂到 body，脱离酒馆可能带有 transform 的扩展容器，避免 fixed 定位偏移。
  document.body.append(panel);
  const rememberFloatState=f=>{if(!f)return;const r=f.getBoundingClientRect();petFloatState={left:r.left,top:r.top,width:r.width,height:r.height,scale:f._lpCurrentScale||1};};
- const returnPetToEditor=()=>{if(!petFloat||!petRoot)return false;rememberFloatState(petFloat);petFloat.remove();petFloat=null;petRoot.style.transform='';petRoot.style.transformOrigin='';panel.querySelector('#lp-stage').append(petRoot);ddAttachJelly(petImage);petRoot._ddPaintBar?.();return true;};
- const open=()=>{if(petFloat)returnPetToEditor();panel.classList.add('is-open');panel.setAttribute('aria-hidden','false');};
+ const returnPetToEditor=()=>{if(!petFloat||!petRoot)return false;rememberFloatState(petFloat);petFloat.remove();petFloat=null;petRoot.style.transform='';petRoot.style.transformOrigin='';panel.querySelector('#lp-stage').append(petRoot);petImage._ddJellyRehost?.();petRoot._ddPaintBar?.();return true;};
+ const open=()=>{if(petFloat)returnPetToEditor();panel.classList.add('is-open');panel.setAttribute('aria-hidden','false');requestAnimationFrame(()=>petImage?._ddJellyRehost?.());};
  const close=()=>{panel.classList.remove('is-open');panel.setAttribute('aria-hidden','true');};
  const injectWandButton=()=>{
   const menu=document.querySelector('#extensionsMenu');if(!menu)return false;
@@ -519,7 +529,7 @@ function mount(){
     });
     const finish=e=>{if(f._lpResizeDrag?.id===e.pointerId){f._lpResizeDrag=null;rememberFloatState(f);}};grip.addEventListener('pointerup',finish);grip.addEventListener('pointercancel',finish);
    });
-   ddAttachJelly(petImage);petRoot._ddPaintBar?.();rememberFloatState(f);
+   petImage._ddJellyRehost?.();petRoot._ddPaintBar?.();rememberFloatState(f);
   });
   close();
  });
