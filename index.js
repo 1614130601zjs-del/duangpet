@@ -64,8 +64,8 @@ function ddAttachJelly(img){
  const wantPointer=conf.tap||conf.drag||S.selecting;
  if(wantPointer){img.draggable=false;img.style.touchAction='none';img.style.webkitUserDrag='none';}
  const MW=DD_JELLY_MW,MH=DD_JELLY_MH;
- let canvas=null,selCv=null,gl=null,prog=null,posBuf=null,idxCount=0,tex=null,texSrc='',cols=0,rows=0,pos=null,locPos=0,boxW=0,boxH=0,failed=false;
- let raf=0,press=null,cx=0,cy=0,lx=0,ly=0,ofx=null,ofy=null,ovx=null,ovy=null,mv=null,shw=null,shown=false;const originalVisibility=img.style.visibility;
+ let canvas=null,selCv=null,gl=null,prog=null,posBuf=null,idxCount=0,tex=null,texSrc='',cols=0,rows=0,pos=null,locPos=0,locSize=null,boxW=0,boxH=0,failed=false;
+ let raf=0,press=null,cx=0,cy=0,lx=0,ly=0,ofx=null,ofy=null,ovx=null,ovy=null,mv=null,shw=null,baseX=null,baseY=null,localW=null,localW2=null,activeRanges=[],shown=false;const originalVisibility=img.style.visibility;
  const dep={x:0,v:0,t:0,k:.3,d:.6},ox={x:0,v:0,t:0,k:.3,d:.7},oy={x:0,v:0,t:0,k:.3,d:.7};
  const aff={x:[0,0,1,1,0],v:[0,0,0,0,0],t:[0,0,1,1,0]};
  const shk={x:0,y:0,vx:0,vy:0};
@@ -127,16 +127,17 @@ function ddAttachJelly(img){
     gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
     posBuf=gl.createBuffer();
-    locPos=gl.getAttribLocation(prog,'aPos');
+    locPos=gl.getAttribLocation(prog,'aPos');locSize=gl.getUniformLocation(prog,'uSize');
    }
    const dpr=Math.min(2,window.devicePixelRatio||1);
    if(Math.abs(bx.w-boxW)>.5||Math.abs(bx.h-boxH)>.5||!pos){
     boxW=bx.w;boxH=bx.h;canvas.width=Math.round(bx.w*dpr);canvas.height=Math.round(bx.h*dpr);
     cols=32;rows=Math.max(16,Math.min(56,Math.round(cols*bx.h/bx.w)));
     const n=(cols+1)*(rows+1);pos=new Float32Array(n*2);const uvs=new Float32Array(n*2);
-    ofx=new Float32Array(n);ofy=new Float32Array(n);ovx=new Float32Array(n);ovy=new Float32Array(n);mv=new Float32Array(n);shw=new Float32Array(n);
+    ofx=new Float32Array(n);ofy=new Float32Array(n);ovx=new Float32Array(n);ovy=new Float32Array(n);mv=new Float32Array(n);shw=new Float32Array(n);baseX=new Float32Array(n);baseY=new Float32Array(n);localW=new Float32Array(n);localW2=new Float32Array(n);activeRanges=[];
     const idx=[];
-    for(let j=0;j<=rows;j++)for(let i=0;i<=cols;i++){const k=j*(cols+1)+i;uvs[k*2]=i/cols;uvs[k*2+1]=j/rows;}
+    for(let j=0;j<=rows;j++)for(let i=0;i<=cols;i++){const k=j*(cols+1)+i;const x=i/cols*boxW,y=j/rows*boxH;baseX[k]=x;baseY[k]=y;pos[k*2]=x;pos[k*2+1]=y;uvs[k*2]=i/cols;uvs[k*2+1]=j/rows;}
+    gl.bindBuffer(gl.ARRAY_BUFFER,posBuf);gl.bufferData(gl.ARRAY_BUFFER,pos,gl.DYNAMIC_DRAW);
     for(let j=0;j<rows;j++)for(let i=0;i<cols;i++){const a=j*(cols+1)+i,b=a+1,c=a+cols+1,d=c+1;idx.push(a,b,c,b,d,c);}
     idxCount=idx.length;
     const ib=gl.createBuffer();gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,ib);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(idx),gl.STATIC_DRAW);
@@ -158,32 +159,59 @@ function ddAttachJelly(img){
  };
  // 图片载入后预热 WebGL、纹理与网格，避免把初始化成本压在第一次触摸上。
  img._ddJellyPrepare=()=>ensure();
+ const buildLocalInfluence=()=>{
+  activeRanges=[];if(!baseX||!localW)return;
+  const m=Math.min(boxW,boxH),feedback=Math.max(.1,Math.min(2.5,Number(ddCfg().feedbackRange||100)/100)),R=.17*m*feedback,R2=.22*m*feedback,RR=R*R,RR2=R2*R2,limit=2*R2,limit2=limit*limit;
+  for(let j=0;j<=rows;j++){
+   const dy=baseY[j*(cols+1)]-cy;if(Math.abs(dy)>limit)continue;
+   let start=-1,end=-1;
+   for(let i=0;i<=cols;i++){
+    const k=j*(cols+1)+i,dx=baseX[k]-cx,d2=dx*dx+dy*dy;
+    if(d2>limit2)continue;
+    localW[k]=Math.exp(-d2/RR)*mv[k];localW2[k]=Math.exp(-d2/RR2)*mv[k];
+    if(start<0)start=i;end=i;
+   }
+   if(start>=0)activeRanges.push({row:j,start,end});
+  }
+ };
+ const restoreActiveMesh=()=>{
+  if(!gl||!posBuf||!baseX||!activeRanges.length)return;
+  gl.bindBuffer(gl.ARRAY_BUFFER,posBuf);
+  for(const r of activeRanges){const first=r.row*(cols+1)+r.start,last=r.row*(cols+1)+r.end;
+   for(let k=first;k<=last;k++){pos[k*2]=baseX[k];pos[k*2+1]=baseY[k];}
+   gl.bufferSubData(gl.ARRAY_BUFFER,first*8,pos.subarray(first*2,(last+1)*2));
+  }
+  activeRanges=[];
+ };
  const draw=()=>{
   const m=Math.min(boxW,boxH),feedback=Math.max(.1,Math.min(2.5,Number(ddCfg().feedbackRange||100)/100)),R=.17*m*feedback,R2=.22*m*feedback,RR=R*R,RR2=R2*R2,shAmp=.05*m*amp;
   const useLocal=scope!=='whole',useAff=scope==='whole';
   const [tx,ty,sx,sy,rot]=aff.x,cr=Math.cos(rot*Math.PI/180),sr=Math.sin(rot*Math.PI/180),mx0=boxW/2,my0=boxH/2;
   const shOn=Math.abs(shk.x)>.0005||Math.abs(shk.y)>.0005;
-  for(let j=0;j<=rows;j++)for(let i=0;i<=cols;i++){
-   const k=j*(cols+1)+i,px=i/cols*boxW,py=j/rows*boxH,m1=mv[k];
-   let x=px,y=py;
-   if(useLocal){
-    const dx=px-cx,dy=py-cy,d2=dx*dx+dy*dy;
-    const w=Math.exp(-d2/RR)*m1,w2=Math.exp(-d2/RR2)*m1;
-    const f=1-dep.x*w;
-    x=cx+dx*f+ox.x*w2+ofx[k];y=cy+dy*f+oy.x*w2+ofy[k];
+  gl.bindBuffer(gl.ARRAY_BUFFER,posBuf);
+  if(scope==='local'&&activeRanges.length){
+   for(const r of activeRanges){const first=r.row*(cols+1)+r.start,last=r.row*(cols+1)+r.end;
+    for(let i=r.start;i<=r.end;i++){
+     const k=r.row*(cols+1)+i,px=baseX[k],py=baseY[k],dx=px-cx,dy=py-cy,w=localW[k],w2=localW2[k],f=1-dep.x*w;
+     let x=cx+dx*f+ox.x*w2+ofx[k],y=cy+dy*f+oy.x*w2+ofy[k];
+     if(shOn){const q=shw[k];x+=shk.x*shAmp*q*(1+.6*(py/boxH-.5));y+=shk.y*shAmp*q*(1+.4*(px/boxW-.5));}
+     pos[k*2]=Math.max(0,Math.min(boxW,x));pos[k*2+1]=Math.max(0,Math.min(boxH,y));
+    }
+    gl.bufferSubData(gl.ARRAY_BUFFER,first*8,pos.subarray(first*2,(last+1)*2));
    }
-   if(useAff){
-    const dxc=px-mx0,dyc=py-my0;
-    const X=mx0+tx+(dxc*cr-dyc*sr)*sx,Y=my0+ty+(dxc*sr+dyc*cr)*sy;
-    x=px+(X-px)*m1;y=py+(Y-py)*m1;
+  }else{
+   for(let j=0;j<=rows;j++)for(let i=0;i<=cols;i++){
+    const k=j*(cols+1)+i,px=baseX[k],py=baseY[k],m1=mv[k];let x=px,y=py;
+    if(useLocal){const dx=px-cx,dy=py-cy,d2=dx*dx+dy*dy,w=Math.exp(-d2/RR)*m1,w2=Math.exp(-d2/RR2)*m1,f=1-dep.x*w;x=cx+dx*f+ox.x*w2+ofx[k];y=cy+dy*f+oy.x*w2+ofy[k];}
+    if(useAff){const dxc=px-mx0,dyc=py-my0,X=mx0+tx+(dxc*cr-dyc*sr)*sx,Y=my0+ty+(dxc*sr+dyc*cr)*sy;x=px+(X-px)*m1;y=py+(Y-py)*m1;}
+    if(shOn){const q=shw[k];x+=shk.x*shAmp*q*(1+.6*(py/boxH-.5));y+=shk.y*shAmp*q*(1+.4*(px/boxW-.5));}
+    pos[k*2]=Math.max(0,Math.min(boxW,x));pos[k*2+1]=Math.max(0,Math.min(boxH,y));
    }
-   if(shOn){const w=shw[k];x+=shk.x*shAmp*w*(1+.6*(py/boxH-.5));y+=shk.y*shAmp*w*(1+.4*(px/boxW-.5));}
-   pos[k*2]=Math.max(0,Math.min(boxW,x));pos[k*2+1]=Math.max(0,Math.min(boxH,y));
+   gl.bufferSubData(gl.ARRAY_BUFFER,0,pos);
   }
   gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);
-  gl.bindBuffer(gl.ARRAY_BUFFER,posBuf);gl.bufferData(gl.ARRAY_BUFFER,pos,gl.DYNAMIC_DRAW);
   gl.enableVertexAttribArray(locPos);gl.vertexAttribPointer(locPos,2,gl.FLOAT,false,0,0);
-  gl.uniform2f(gl.getUniformLocation(prog,'uSize'),boxW,boxH);
+  gl.uniform2f(locSize,boxW,boxH);
   gl.drawElements(gl.TRIANGLES,idxCount,gl.UNSIGNED_SHORT,0);
  };
  const step=s=>{s.v+=(s.t-s.x)*s.k;s.v*=s.d;s.x+=s.v;return Math.abs(s.v)>.002||Math.abs(s.t-s.x)>.002;};
@@ -206,7 +234,7 @@ function ddAttachJelly(img){
   if(ofx){for(let k=0;k<ofx.length;k++){if(!press||!press.smudging){ovx[k]+=(0-ofx[k])*.12;ovy[k]+=(0-ofy[k])*.12;ovx[k]*=.8;ovy[k]*=.8;ofx[k]+=ovx[k];ofy[k]+=ovy[k];}if(Math.abs(ofx[k])>.02||Math.abs(ofy[k])>.02||Math.abs(ovx[k])>.01||Math.abs(ovy[k])>.01)live=true;}}
   draw();
   if(live||(press&&!press.paint))raf=requestAnimationFrame(tick);
-  else{raf=0;canvas.style.display='none';img.style.visibility=originalVisibility;shown=false;resetAll();}
+  else{raf=0;restoreActiveMesh();canvas.style.display='none';img.style.visibility=originalVisibility;shown=false;resetAll();}
  };
  const show=()=>{if(canvas&&!shown){canvas.style.display='block';img.style.visibility='hidden';shown=true;}};
  const kick=()=>{if(!raf)raf=requestAnimationFrame(tick);};
@@ -230,7 +258,7 @@ function ddAttachJelly(img){
   if(S.selecting){
    press={id:e.pointerId,paint:true};selCv.style.display='block';paintAt(px,py);return;
   }
-  cx=px;cy=py;lx=px;ly=py;
+  cx=px;cy=py;lx=px;ly=py;if(scope==='local')buildLocalInfluence();
   press={id:e.pointerId,x:e.clientX,y:e.clientY,t:Date.now(),moved:false,smudging:false};
   show();
   Object.assign(dep,{k:.3,d:.6});Object.assign(ox,{k:.3,d:.7});Object.assign(oy,{k:.3,d:.7});
