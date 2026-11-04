@@ -69,6 +69,7 @@ function ddAttachJelly(img){
  const dep={x:0,v:0,t:0,k:.3,d:.6},ox={x:0,v:0,t:0,k:.3,d:.7},oy={x:0,v:0,t:0,k:.3,d:.7};
  const aff={x:[0,0,1,1,0],v:[0,0,0,0,0],t:[0,0,1,1,0]};
  const shk={x:0,y:0,vx:0,vy:0};
+ const iconWobble={r:0,vr:0,s:0,vs:0};
  const destroy=()=>{cancelAnimationFrame(raf);raf=0;img.style.visibility=originalVisibility;try{canvas?.remove();}catch{}try{selCv?.remove();}catch{}canvas=null;selCv=null;gl=null;};
  ac.signal.addEventListener('abort',destroy);
  const box=()=>{
@@ -211,7 +212,14 @@ function ddAttachJelly(img){
     const k=j*(cols+1)+i,px=baseX[k],py=baseY[k],m1=mv[k];let x=px,y=py;
     if(useLocal){const dx=px-cx,dy=py-cy,d2=dx*dx+dy*dy,w=Math.exp(-d2/RR)*m1,w2=Math.exp(-d2/RR2)*m1,f=1-dep.x*w;x=cx+dx*f+ox.x*w2+ofx[k];y=cy+dy*f+oy.x*w2+ofy[k];}
     if(useAff){const dxc=px-mx0,dyc=py-my0,X=mx0+tx+(dxc*cr-dyc*sr)*sx,Y=my0+ty+(dxc*sr+dyc*cr)*sy;x=px+(X-px)*m1;y=py+(Y-py)*m1;}
-    if(shOn){const q=shw[k];x+=shk.x*shAmp*q*(1+.6*(py/boxH-.5));y+=shk.y*shAmp*q*(1+.4*(px/boxW-.5));}
+    if(ddCfg().interactionMode==='icon'){
+     // 复刻 Duang 原版：底层保持原位，上层以底边中点为轴 skewX + scaleY。
+     const fixed=Math.max(0,Math.min(70,Number(ddCfg().fixedBottom??26)||0))/100,pivotY=boxH*(1-fixed),w=mv[k];
+     if(w>0){const dx=x-boxW/2,dy=y-pivotY,rad=(-iconWobble.r)*Math.PI/180,cs=Math.cos(rad),sn=Math.sin(rad),sx=1-iconWobble.s*.5,sy=1+iconWobble.s;
+      const skewX=Math.tan(rad);const tx=dx*sx+dy*skewX,ty=dy*sy;
+      x=boxW/2+(dx+(tx-dx)*w);y=pivotY+(dy+(ty-dy)*w);
+     }
+    }else if(shOn){const q=shw[k];x+=shk.x*shAmp*q*(1+.6*(py/boxH-.5));y+=shk.y*shAmp*q*(1+.4*(px/boxW-.5));}
     pos[k*2]=Math.max(0,Math.min(boxW,x));pos[k*2+1]=Math.max(0,Math.min(boxH,y));
    }
    gl.bufferSubData(gl.ARRAY_BUFFER,0,pos);
@@ -223,7 +231,7 @@ function ddAttachJelly(img){
  };
  const step=s=>{s.v+=(s.t-s.x)*s.k;s.v*=s.d;s.x+=s.v;return Math.abs(s.v)>.002||Math.abs(s.t-s.x)>.002;};
  const resetAll=()=>{
-  dep.x=dep.v=ox.x=ox.v=oy.x=oy.v=0;aff.x=[0,0,1,1,0];aff.v=[0,0,0,0,0];aff.t=[0,0,1,1,0];shk.x=shk.y=shk.vx=shk.vy=0;
+  dep.x=dep.v=ox.x=ox.v=oy.x=oy.v=0;aff.x=[0,0,1,1,0];aff.v=[0,0,0,0,0];aff.t=[0,0,1,1,0];shk.x=shk.y=shk.vx=shk.vy=0;iconWobble.r=iconWobble.vr=iconWobble.s=iconWobble.vs=0;
   if(ofx){ofx.fill(0);ofy.fill(0);ovx.fill(0);ovy.fill(0);}
  };
  const K=.16,D=.80;
@@ -238,6 +246,10 @@ function ddAttachJelly(img){
   }
   shk.vx+=-shk.x*.1;shk.vx*=.9;shk.x+=shk.vx;shk.vy+=-shk.y*.1;shk.vy*=.9;shk.y+=shk.vy;
   if(Math.abs(shk.x)>.002||Math.abs(shk.vx)>.002||Math.abs(shk.y)>.002||Math.abs(shk.vy)>.002)live=true;
+  // Duang 原版图标弹簧：角度与纵向挤压分别回弹。
+  iconWobble.vr+=-iconWobble.r*.1;iconWobble.vr*=.9;iconWobble.r+=iconWobble.vr;
+  iconWobble.vs+=-iconWobble.s*.14;iconWobble.vs*=.86;iconWobble.s+=iconWobble.vs;
+  if(Math.abs(iconWobble.r)+Math.abs(iconWobble.vr)+Math.abs(iconWobble.s*30)+Math.abs(iconWobble.vs*30)>.08)live=true;
   if(ofx){for(let k=0;k<ofx.length;k++){if(!press||!press.smudging){ovx[k]+=(0-ofx[k])*.12;ovy[k]+=(0-ofy[k])*.12;ovx[k]*=.8;ovy[k]*=.8;ofx[k]+=ovx[k];ofy[k]+=ovy[k];}if(Math.abs(ofx[k])>.02||Math.abs(ofy[k])>.02||Math.abs(ovx[k])>.01||Math.abs(ovy[k])>.01)live=true;}}
   draw();
   if(live||(press&&!press.paint))raf=requestAnimationFrame(tick);
@@ -332,8 +344,15 @@ function ddAttachJelly(img){
    if(Math.abs(ax)+Math.abs(ay)<1.2)return;
    if(!ensure())return;
    show();
-   shk.vx+=Math.max(-1.2,Math.min(1.2,-ax*.025*amp));shk.vy+=Math.max(-1.2,Math.min(1.2,ay*.025*amp));
-   shk.x=Math.max(-1.6,Math.min(1.6,shk.x));shk.y=Math.max(-1.6,Math.min(1.6,shk.y));
+   if(ddCfg().interactionMode==='icon'){
+    // 直接采用原版 ddStartBallShake 的受力方向、力度上限与弹簧输入。
+    const k=ddJellyCfg().amp/.5,cl=(v,m)=>Math.max(-m,Math.min(m,v));
+    iconWobble.vr+=cl(-ax*.45*k,5*k);iconWobble.vs+=cl(ay*.012*k,.05*k);
+    iconWobble.r=cl(iconWobble.r,20);iconWobble.s=cl(iconWobble.s,.25);
+   }else{
+    shk.vx+=Math.max(-1.2,Math.min(1.2,-ax*.025*amp));shk.vy+=Math.max(-1.2,Math.min(1.2,ay*.025*amp));
+    shk.x=Math.max(-1.6,Math.min(1.6,shk.x));shk.y=Math.max(-1.6,Math.min(1.6,shk.y));
+   }
    kick();
   },sig);
  }
