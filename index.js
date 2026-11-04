@@ -64,14 +64,16 @@ function ddAttachJelly(img){
  const wantPointer=conf.tap||conf.drag||S.selecting;
  if(wantPointer){img.draggable=false;img.style.touchAction='none';img.style.webkitUserDrag='none';}
  const MW=DD_JELLY_MW,MH=DD_JELLY_MH;
- let canvas=null,selCv=null,gl=null,prog=null,posBuf=null,idxCount=0,tex=null,texSrc='',cols=0,rows=0,pos=null,locPos=0,locSize=null,boxW=0,boxH=0,failed=false;
+ let canvas=null,selCv=null,gl=null,prog=null,posBuf=null,idxCount=0,tex=null,texSrc='',cols=0,rows=0,pos=null,locPos=0,locSize=null,boxW=0,boxH=0,padX=0,padY=0,locOff=null,failed=false;
  let raf=0,press=null,cx=0,cy=0,lx=0,ly=0,ofx=null,ofy=null,ovx=null,ovy=null,mv=null,shw=null,baseX=null,baseY=null,localW=null,localW2=null,activeRanges=[],shown=false;const originalVisibility=img.style.visibility;
  const dep={x:0,v:0,t:0,k:.3,d:.6},ox={x:0,v:0,t:0,k:.3,d:.7},oy={x:0,v:0,t:0,k:.3,d:.7};
  const aff={x:[0,0,1,1,0],v:[0,0,0,0,0],t:[0,0,1,1,0]};
  const shk={x:0,y:0,vx:0,vy:0};
  const destroy=()=>{cancelAnimationFrame(raf);raf=0;img.style.visibility=originalVisibility;try{canvas?.remove();}catch{}try{selCv?.remove();}catch{}canvas=null;selCv=null;gl=null;};
  ac.signal.addEventListener('abort',destroy);
- const box=()=>{
+  let bxCache=null;const box=()=>bxCache||(bxCache=boxMeasure());
+ try{new ResizeObserver(()=>{bxCache=null;}).observe(img);}catch{}
+ const boxMeasure=()=>{
   // 使用未受 CSS transform 缩放的布局尺寸；浮窗缩放时不能拿屏幕像素尺寸重复缩放画布。
   const cs=getComputedStyle(img);
   const f=n=>parseFloat(cs[n])||0;
@@ -104,7 +106,8 @@ function ddAttachJelly(img){
  };
  const placeOverlays=bx=>{
   const l=(img.offsetLeft+bx.left)+'px',t=(img.offsetTop+bx.top)+'px',w=bx.w+'px',h=bx.h+'px';
-  for(const c of [canvas,selCv]){if(!c)continue;c.style.left=l;c.style.top=t;c.style.width=w;c.style.height=h;}
+  if(selCv){selCv.style.left=l;selCv.style.top=t;selCv.style.width=w;selCv.style.height=h;}
+  if(canvas){canvas.style.left=(img.offsetLeft+bx.left-padX)+'px';canvas.style.top=(img.offsetTop+bx.top-padY)+'px';canvas.style.width=(bx.w+2*padX)+'px';canvas.style.height=(bx.h+2*padY)+'px';}
  };
  const ensure=()=>{
   if(failed)return false;
@@ -119,7 +122,7 @@ function ddAttachJelly(img){
     gl=canvas.getContext('webgl',{alpha:true,premultipliedAlpha:true,antialias:true})||canvas.getContext('experimental-webgl');
     if(!gl)throw new Error('no gl');
     prog=gl.createProgram();
-    gl.attachShader(prog,compile(gl.VERTEX_SHADER,'attribute vec2 aPos;attribute vec2 aUv;uniform vec2 uSize;varying vec2 vUv;void main(){vUv=aUv;gl_Position=vec4(aPos.x/uSize.x*2.0-1.0,1.0-aPos.y/uSize.y*2.0,0.0,1.0);}'));
+    gl.attachShader(prog,compile(gl.VERTEX_SHADER,'attribute vec2 aPos;attribute vec2 aUv;uniform vec2 uSize;uniform vec2 uOff;varying vec2 vUv;void main(){vUv=aUv;vec2 p=aPos+uOff;gl_Position=vec4(p.x/uSize.x*2.0-1.0,1.0-p.y/uSize.y*2.0,0.0,1.0);}'));
     gl.attachShader(prog,compile(gl.FRAGMENT_SHADER,'precision mediump float;uniform sampler2D uTex;varying vec2 vUv;void main(){gl_FragColor=texture2D(uTex,vUv);}'));
     gl.linkProgram(prog);if(!gl.getProgramParameter(prog,gl.LINK_STATUS))throw new Error('link');
     gl.useProgram(prog);
@@ -127,11 +130,13 @@ function ddAttachJelly(img){
     gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
     posBuf=gl.createBuffer();
-    locPos=gl.getAttribLocation(prog,'aPos');locSize=gl.getUniformLocation(prog,'uSize');
+    locPos=gl.getAttribLocation(prog,'aPos');locSize=gl.getUniformLocation(prog,'uSize');locOff=gl.getUniformLocation(prog,'uOff');
    }
-   const dpr=Math.min(2,window.devicePixelRatio||1);
-   if(Math.abs(bx.w-boxW)>.5||Math.abs(bx.h-boxH)>.5||!pos){
-    boxW=bx.w;boxH=bx.h;canvas.width=Math.round(bx.w*dpr);canvas.height=Math.round(bx.h*dpr);
+   const dpr=Math.min(1.5,window.devicePixelRatio||1);
+   // 小窗里把画布四周各放大一圈，果冻才能鼓出、晃出原图轮廓；编辑页里不放大，避免撑出滚动条
+   const wantPad=img.closest('#lp-float')?.3:0,npx=Math.round(bx.w*wantPad),npy=Math.round(bx.h*wantPad);
+   if(Math.abs(bx.w-boxW)>.5||Math.abs(bx.h-boxH)>.5||npx!==padX||npy!==padY||!pos){
+    boxW=bx.w;boxH=bx.h;padX=npx;padY=npy;canvas.width=Math.round((bx.w+2*padX)*dpr);canvas.height=Math.round((bx.h+2*padY)*dpr);
     cols=32;rows=Math.max(16,Math.min(56,Math.round(cols*bx.h/bx.w)));
     const n=(cols+1)*(rows+1);pos=new Float32Array(n*2);const uvs=new Float32Array(n*2);
     ofx=new Float32Array(n);ofy=new Float32Array(n);ovx=new Float32Array(n);ovy=new Float32Array(n);mv=new Float32Array(n);shw=new Float32Array(n);baseX=new Float32Array(n);baseY=new Float32Array(n);localW=new Float32Array(n);localW2=new Float32Array(n);activeRanges=[];
@@ -195,7 +200,7 @@ function ddAttachJelly(img){
      const k=r.row*(cols+1)+i,px=baseX[k],py=baseY[k],dx=px-cx,dy=py-cy,w=localW[k],w2=localW2[k],f=1-dep.x*w;
      let x=cx+dx*f+ox.x*w2+ofx[k],y=cy+dy*f+oy.x*w2+ofy[k];
      if(shOn){const q=shw[k];x+=shk.x*shAmp*q*(1+.6*(py/boxH-.5));y+=shk.y*shAmp*q*(1+.4*(px/boxW-.5));}
-     pos[k*2]=Math.max(0,Math.min(boxW,x));pos[k*2+1]=Math.max(0,Math.min(boxH,y));
+     pos[k*2]=Math.max(-padX,Math.min(boxW+padX,x));pos[k*2+1]=Math.max(-padY,Math.min(boxH+padY,y));
     }
     gl.bufferSubData(gl.ARRAY_BUFFER,first*8,pos.subarray(first*2,(last+1)*2));
    }
@@ -205,13 +210,13 @@ function ddAttachJelly(img){
     if(useLocal){const dx=px-cx,dy=py-cy,d2=dx*dx+dy*dy,w=Math.exp(-d2/RR)*m1,w2=Math.exp(-d2/RR2)*m1,f=1-dep.x*w;x=cx+dx*f+ox.x*w2+ofx[k];y=cy+dy*f+oy.x*w2+ofy[k];}
     if(useAff){const dxc=px-mx0,dyc=py-my0,X=mx0+tx+(dxc*cr-dyc*sr)*sx,Y=my0+ty+(dxc*sr+dyc*cr)*sy;x=px+(X-px)*m1;y=py+(Y-py)*m1;}
      if(shOn){const q=shw[k];x+=shk.x*shAmp*q*(1+.6*(py/boxH-.5));y+=shk.y*shAmp*q*(1+.4*(px/boxW-.5));}
-     pos[k*2]=Math.max(0,Math.min(boxW,x));pos[k*2+1]=Math.max(0,Math.min(boxH,y));
+     pos[k*2]=Math.max(-padX,Math.min(boxW+padX,x));pos[k*2+1]=Math.max(-padY,Math.min(boxH+padY,y));
    }
    gl.bufferSubData(gl.ARRAY_BUFFER,0,pos);
   }
   gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);
   gl.enableVertexAttribArray(locPos);gl.vertexAttribPointer(locPos,2,gl.FLOAT,false,0,0);
-  gl.uniform2f(locSize,boxW,boxH);
+  gl.uniform2f(locSize,boxW+2*padX,boxH+2*padY);gl.uniform2f(locOff,padX,padY);
   gl.drawElements(gl.TRIANGLES,idxCount,gl.UNSIGNED_SHORT,0);
  };
  const step=s=>{s.v+=(s.t-s.x)*s.k;s.v*=s.d;s.x+=s.v;return Math.abs(s.v)>.002||Math.abs(s.t-s.x)>.002;};
@@ -633,9 +638,20 @@ function mount(){
     f.style.left=Math.max(8,innerWidth-f.offsetWidth-24)+'px';f.style.top=Math.max(8,innerHeight-f.offsetHeight-100)+'px';
    }
    let petHoldTimer=0,petHoldStart=null;f.addEventListener('pointerdown',e=>{if(!e.target.closest('.lp-image-host img'))return;petHoldStart={x:e.clientX,y:e.clientY,id:e.pointerId};clearTimeout(petHoldTimer);petHoldTimer=setTimeout(()=>{if(!petHoldStart)return;petHoldStart=null;returnPetToEditor();open();},620);},true);f.addEventListener('pointermove',e=>{if(!petHoldStart||petHoldStart.id!==e.pointerId)return;if(Math.hypot(e.clientX-petHoldStart.x,e.clientY-petHoldStart.y)>10){clearTimeout(petHoldTimer);petHoldStart=null;}},true);const clearPetHold=()=>{clearTimeout(petHoldTimer);petHoldStart=null;};f.addEventListener('pointerup',clearPetHold,true);f.addEventListener('pointercancel',clearPetHold,true);const dragZone=document.createElement('div');dragZone.className='lp-float-drag';dragZone.setAttribute('aria-label','移动桌宠');f.append(dragZone);
+   // 单击桌宠：显出虚线边框、移动条和四角圆点，可以拖动、缩放；3.5 秒没操作或点到窗口外就收起。平时只做互动。
+   let frameTimer=0,tapStart=null;
+   const hideFrame=()=>{clearTimeout(frameTimer);f.classList.remove('is-framed');};
+   const keepFrame=()=>{if(!f.classList.contains('is-framed'))return;clearTimeout(frameTimer);frameTimer=setTimeout(hideFrame,3500);};
+   const showFrame=()=>{f.classList.add('is-framed');keepFrame();};
+   f._lpKeepFrame=keepFrame;
+   f.addEventListener('pointerdown',e=>{if(e.target.closest('.lp-image-host img'))tapStart={x:e.clientX,y:e.clientY,t:Date.now(),id:e.pointerId};else tapStart=null;if(f.classList.contains('is-framed'))keepFrame();},true);
+   f.addEventListener('pointerup',e=>{const q=tapStart;tapStart=null;if(!q||q.id!==e.pointerId)return;if(Date.now()-q.t<450&&Math.hypot(e.clientX-q.x,e.clientY-q.y)<8)showFrame();},true);
+   f.addEventListener('pointercancel',()=>{tapStart=null;},true);
+   const outsideHide=e=>{if(!f.isConnected){document.removeEventListener('pointerdown',outsideHide,true);return;}if(!f.contains(e.target))hideFrame();};
+   document.addEventListener('pointerdown',outsideHide,true);
    let move=null;
    dragZone.addEventListener('pointerdown',e=>{e.preventDefault();move={id:e.pointerId,x:e.clientX-f.getBoundingClientRect().left,y:e.clientY-f.getBoundingClientRect().top};dragZone.setPointerCapture(e.pointerId);});
-   dragZone.addEventListener('pointermove',e=>{if(!move||move.id!==e.pointerId)return;f.style.left=clamp(e.clientX-move.x,0,innerWidth-f.offsetWidth)+'px';f.style.top=clamp(e.clientY-move.y,0,innerHeight-f.offsetHeight)+'px';rememberFloatState(f);});
+   dragZone.addEventListener('pointermove',e=>{if(!move||move.id!==e.pointerId)return;f.style.left=clamp(e.clientX-move.x,0,innerWidth-f.offsetWidth)+'px';f.style.top=clamp(e.clientY-move.y,0,innerHeight-f.offsetHeight)+'px';rememberFloatState(f);keepFrame();});
    const moveEnd=e=>{if(move&&move.id===e.pointerId){move=null;rememberFloatState(f);}};dragZone.addEventListener('pointerup',moveEnd);dragZone.addEventListener('pointercancel',moveEnd);
    ['nw','ne','sw','se'].forEach(handle=>{
     const grip=document.createElement('div');grip.className='lp-float-resize lp-resize-'+handle;grip.dataset.handle=handle;grip.setAttribute('aria-label','调整桌宠大小');f.append(grip);
@@ -649,7 +665,7 @@ function mount(){
      f.style.width=w+'px';f.style.height=h+'px';content.style.width=base.contentWidth*scale+'px';content.style.height=base.contentHeight*scale+'px';
      petRoot.style.transformOrigin='center center';petRoot.style.transform='scale('+scale+')';f._lpCurrentScale=scale;
      const left=handle.includes('w')?q.left+q.width-w:q.left,top=handle.includes('n')?q.top+q.height-h:q.top;
-     f.style.left=clamp(left,0,innerWidth-w)+'px';f.style.top=clamp(top,0,innerHeight-h)+'px';rememberFloatState(f);
+     f.style.left=clamp(left,0,innerWidth-w)+'px';f.style.top=clamp(top,0,innerHeight-h)+'px';rememberFloatState(f);keepFrame();
     });
     const finish=e=>{if(f._lpResizeDrag?.id===e.pointerId){f._lpResizeDrag=null;rememberFloatState(f);}};grip.addEventListener('pointerup',finish);grip.addEventListener('pointercancel',finish);
    });

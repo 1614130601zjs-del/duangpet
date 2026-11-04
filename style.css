@@ -23,7 +23,7 @@ body > #lp-panel.is-open{display:flex;opacity:1;transform:translate3d(-50%,-50%,
 
 /* 浮窗等比缩放：四角拖动，内容随窗口统一缩放 */
 #lp-float{box-sizing:border-box;min-width:0;min-height:0;overflow:visible;touch-action:none}
-#lp-float .lp-float-content{position:relative;display:flex;align-items:center;justify-content:center;transform-origin:top left;overflow:hidden}
+#lp-float .lp-float-content{position:relative;display:flex;align-items:center;justify-content:center;transform-origin:top left;overflow:visible}
 #lp-float .lp-float-content>.lp-interaction{flex:none;transform-origin:center center}
 #lp-float .lp-float-resize{position:absolute;z-index:20;width:22px;height:22px;touch-action:none}
 #lp-float .lp-resize-nw{left:-1px;top:-1px;cursor:nwse-resize}
@@ -81,3 +81,13 @@ body>#lp-panel{--lp-panel:#fff;--lp-text:#171717;--lp-muted:#777;--lp-border:#de
 #lp-panel .lp-gallery-actions button{border:1px solid #ddd;border-radius:3px;background:#fff;color:#222;font-size:11px}
 #lp-panel .lp-gallery-empty{padding:50px 12px;color:#999}
 @media(max-width:420px){body>#lp-panel{padding:13px}#lp-panel .lp-title{font-size:27px}#lp-panel .lp-gallery-grid{gap:10px}#lp-panel .lp-gallery-card>img{height:145px}}
+
+/* 单击桌宠后显出的编辑边框：虚线框 + 顶部移动条 + 四角圆点 */
+#lp-float.is-framed::after{content:"";position:absolute;inset:-3px;border:2px dashed var(--SmartThemeQuoteColor,#ff7aa8);border-radius:10px;pointer-events:none;z-index:18}
+#lp-float.is-framed .lp-float-drag{top:-40px;left:50%;right:auto;width:96px;height:30px;margin-left:-48px;border-radius:15px;background:var(--SmartThemeQuoteColor,#ff7aa8);cursor:grab;display:flex;align-items:center;justify-content:center}
+#lp-float.is-framed .lp-float-drag::before{content:"移动";font-size:12px;line-height:30px;color:#fff;font-weight:600;letter-spacing:2px}
+#lp-float.is-framed .lp-float-resize{width:32px;height:32px;border-radius:50%;background:var(--SmartThemeQuoteColor,#ff7aa8);border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.35);box-sizing:border-box}
+#lp-float.is-framed .lp-resize-nw{left:-16px;top:-16px}
+#lp-float.is-framed .lp-resize-ne{right:-16px;top:-16px}
+#lp-float.is-framed .lp-resize-sw{left:-16px;bottom:-16px}
+#lp-float.is-framed .lp-resize-se{right:-16px;bottom:-16px}
