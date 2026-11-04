@@ -55,3 +55,10 @@
 .lp-mask-tools label{display:flex;align-items:center;gap:6px;color:var(--lp-muted)}
 .lp-mask-tools input{width:92px;accent-color:var(--lp-accent)}
 .lp-mask-tools output{min-width:22px;color:var(--lp-text);font-variant-numeric:tabular-nums}
+
+.lp-mask-tools button{touch-action:manipulation}
+#lp-float{position:fixed;z-index:2147481800;display:flex;flex-direction:column;align-items:center;gap:4px;width:max-content;max-width:min(88vw,520px);padding:5px;border:1px solid rgba(255,255,255,.22);border-radius:14px;background:rgba(28,26,34,.58);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 8px 28px rgba(0,0,0,.24);touch-action:pan-x pan-y}
+.lp-float-handle{display:flex;align-items:center;justify-content:space-between;gap:18px;width:100%;padding:2px 4px;color:rgba(255,255,255,.78);font-size:10px;letter-spacing:.04em;touch-action:none;cursor:grab;user-select:none}
+.lp-float-handle:active{cursor:grabbing}
+.lp-float-handle button{border:1px solid rgba(255,255,255,.2);border-radius:7px;padding:3px 8px;background:rgba(255,255,255,.08);color:#fff;font:inherit;font-size:10px}
+#lp-float #lp-pet-canvas{display:block;max-width: min(88vw,520px);max-height:56dvh}
