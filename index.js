@@ -478,7 +478,7 @@ async function dbDelete(key){const db=await openAssetDB();return new Promise((re
 let maskSaveTimer=0;
 function ddPersistMask(img,S){if(!img||!S)return;clearTimeout(maskSaveTimer);maskSaveTimer=setTimeout(()=>{dbPut('pet-mask',{mask:Array.from(S.mask),has:S.has}).catch(e=>console.warn('[小小桌宠] 选区保存失败',e));},180);}
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-let petUrl='',petRoot=null,petImage=null,petFloat=null,petFloatState=null,petBlob=null,petEraser=null,petEraserHistory=[];
+let petUrl='',petRoot=null,petImage=null,petFloat=null,petFloatState=null,petBlob=null,petEraser=null,petEraserHistory=[],activeGalleryId=null;
 function saveCfg(){try{saveSettingsDebounced();}catch{}}
 function toast(t){const el=document.querySelector('#lp-toast');if(!el)return;el.textContent=t;el.classList.add('is-visible');clearTimeout(el._timer);el._timer=setTimeout(()=>el.classList.remove('is-visible'),2100);}
 function detachPet(){if(petImage)petImage._ddJellyAbort?.abort();if(petFloat)petFloat.remove();petFloat=null;petFloatState=null;petRoot?.remove();petRoot=null;petImage=null;}
@@ -497,13 +497,19 @@ async function getPetGallery(){const list=await dbGet(GALLERY_KEY);return Array.
 async function savePetToGallery(){
  if(!petImage||!petBlob)throw new Error('请先导入桌宠图片');if(petEraser)await ddSetEraser(false);
  const S=ddJellyState(petImage),cfg=ddCfg(),settings={};for(const k of GALLERY_CFG_KEYS)if(cfg[k]!==undefined)settings[k]=cfg[k];
- const list=await getPetGallery(),id='pet-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7),name=(prompt('给这只桌宠取个名字','我的桌宠')||'').trim()||'未命名桌宠';
- await dbPut('gallery-image:'+id,petBlob);list.unshift({id,name,createdAt:Date.now(),mask:{mask:Array.from(S.mask),has:S.has},settings});await dbPut(GALLERY_KEY,list);return name;
+ const list=await getPetGallery(),existing=activeGalleryId?list.find(x=>x.id===activeGalleryId):null;
+ if(existing){
+  await dbPut('gallery-image:'+existing.id,petBlob);
+  existing.mask={mask:Array.from(S.mask),has:S.has};existing.settings=settings;existing.updatedAt=Date.now();
+  await dbPut(GALLERY_KEY,list);return {name:existing.name,overwritten:true};
+ }
+ const id='pet-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7),name=(prompt('给这只桌宠取个名字','我的桌宠')||'').trim()||'未命名桌宠';
+ await dbPut('gallery-image:'+id,petBlob);list.unshift({id,name,createdAt:Date.now(),mask:{mask:Array.from(S.mask),has:S.has},settings});await dbPut(GALLERY_KEY,list);activeGalleryId=id;return {name,overwritten:false};
 }
 async function renderPetGallery(page,onApplied){
  const list=await getPetGallery(),grid=page.querySelector('.lp-gallery-grid');grid.replaceChildren();const count=page.querySelector('.lp-gallery-count');if(count)count.textContent=String(list.length).padStart(2,'0')+' ITEMS';
  if(!list.length){const empty=document.createElement('div');empty.className='lp-gallery-empty';empty.textContent='这里还空着，先收留一只桌宠吧';grid.append(empty);return;}
- for(const item of list){const card=document.createElement('article');card.className='lp-gallery-card';const img=document.createElement('img');img.alt=item.name;const blob=await dbGet('gallery-image:'+item.id);if(blob)img.src=URL.createObjectURL(blob);const info=document.createElement('div');info.className='lp-gallery-info';const name=document.createElement('b');name.textContent=item.name;const actions=document.createElement('div');actions.className='lp-gallery-actions';const apply=document.createElement('button');apply.type='button';apply.textContent='应用';apply.addEventListener('click',async()=>{try{for(const k of GALLERY_CFG_KEYS)if(item.settings&&item.settings[k]!==undefined)ddCfg()[k]=item.settings[k];ddSave();await dbPut('pet-mask',item.mask||{mask:[],has:false});const blob=await dbGet('gallery-image:'+item.id);if(!blob)throw new Error('图库图片文件不存在');await setPetImage(blob);if(onApplied)await onApplied();toast('已切换：'+item.name);}catch(e){toast(e.message||'切换失败');}});const remove=document.createElement('button');remove.type='button';remove.textContent='删除';remove.addEventListener('click',async()=>{if(!confirm('删除「'+item.name+'」？'))return;await dbDelete('gallery-image:'+item.id);await dbPut(GALLERY_KEY,(await getPetGallery()).filter(x=>x.id!==item.id));await renderPetGallery(page);});actions.append(apply,remove);info.append(name,actions);card.append(img,info);grid.append(card);}
+ for(const item of list){const card=document.createElement('article');card.className='lp-gallery-card';const img=document.createElement('img');img.alt=item.name;const blob=await dbGet('gallery-image:'+item.id);if(blob)img.src=URL.createObjectURL(blob);const info=document.createElement('div');info.className='lp-gallery-info';const name=document.createElement('b');name.textContent=item.name;const actions=document.createElement('div');actions.className='lp-gallery-actions';const apply=document.createElement('button');apply.type='button';apply.textContent='应用';apply.addEventListener('click',async()=>{try{for(const k of GALLERY_CFG_KEYS)if(item.settings&&item.settings[k]!==undefined)ddCfg()[k]=item.settings[k];ddSave();await dbPut('pet-mask',item.mask||{mask:[],has:false});const blob=await dbGet('gallery-image:'+item.id);if(!blob)throw new Error('图库图片文件不存在');await setPetImage(blob);activeGalleryId=item.id;const saveButton=document.querySelector('#lp-gallery-save');if(saveButton)saveButton.textContent='覆盖保存';if(onApplied)await onApplied();toast('已切换：'+item.name);}catch(e){toast(e.message||'切换失败');}});const remove=document.createElement('button');remove.type='button';remove.textContent='删除';remove.addEventListener('click',async()=>{if(!confirm('删除「'+item.name+'」？'))return;await dbDelete('gallery-image:'+item.id);await dbPut(GALLERY_KEY,(await getPetGallery()).filter(x=>x.id!==item.id));await renderPetGallery(page);});actions.append(apply,remove);info.append(name,actions);card.append(img,info);grid.append(card);}
 }
 
 
@@ -591,9 +597,9 @@ function mount(){
  const setTab=async tab=>{if(tab==='gallery'&&petEraser)await ddSetEraser(false);const gallery=tab==='gallery';panel.querySelector('#lp-editor-page').hidden=gallery;galleryPage.hidden=!gallery;panel.querySelectorAll('[data-lp-tab]').forEach(b=>b.classList.toggle('is-active',b.dataset.lpTab===tab));if(gallery)await renderPetGallery(galleryPage,()=>setTab('editor'));};
  panel.querySelectorAll('[data-lp-tab]').forEach(b=>b.addEventListener('click',()=>setTab(b.dataset.lpTab)));
  const subtitle=panel.querySelector('#lp-subtitle');subtitle.textContent=ddCfg().subtitle||subtitle.textContent;subtitle.addEventListener('click',()=>{if(subtitle.querySelector('input'))return;const input=document.createElement('input');input.className='lp-subtitle-input';input.maxLength=80;input.value=subtitle.textContent;subtitle.replaceChildren(input);input.focus();input.select();const save=()=>{const value=input.value.trim()||'摸摸它，看看会不会 DUANG';subtitle.textContent=value;ddCfg().subtitle=value;ddSave();};input.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();input.blur();}if(e.key==='Escape'){input.value=subtitle.dataset.original||'摸摸它，看看会不会 DUANG';input.blur();}});subtitle.dataset.original=input.value;input.addEventListener('blur',save,{once:true});});
- gallerySave.addEventListener('click',async()=>{try{const name=await savePetToGallery();toast('已保存到图库：'+name);}catch(e){toast(e.message||'保存失败');}});
+ gallerySave.addEventListener('click',async()=>{try{const result=await savePetToGallery();gallerySave.textContent='覆盖保存';toast(result.overwritten?'已覆盖保存：'+result.name:'已保存到图库：'+result.name);}catch(e){toast(e.message||'保存失败');}});
  panel.querySelector('#lp-change-image').addEventListener('click',()=>panel.querySelector('#lp-file').click());
- panel.querySelector('#lp-file').addEventListener('change',async e=>{const f=e.target.files?.[0];e.target.value='';if(!f)return;try{await setPetImage(f);toast('图片已保存');}catch(err){toast(err.message||'图片载入失败');}});
+ panel.querySelector('#lp-file').addEventListener('change',async e=>{const f=e.target.files?.[0];e.target.value='';if(!f)return;try{activeGalleryId=null;gallerySave.textContent='保存到图库';await setPetImage(f);toast('图片已保存');}catch(err){toast(err.message||'图片载入失败');}});
  panel.querySelector('#lp-eraser-toggle').addEventListener('click',()=>{if(petEraser)ddSetEraser(false);else ddSetEraser(true);});
  panel.querySelector('#lp-eraser-size').addEventListener('input',e=>{panel.querySelector('#lp-eraser-size-value').textContent=e.target.value+'%';});
  panel.querySelector('#lp-eraser-soft').addEventListener('input',e=>{panel.querySelector('#lp-eraser-soft-value').textContent=e.target.value+'%';});
