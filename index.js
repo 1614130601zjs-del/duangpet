@@ -166,6 +166,11 @@ function drawPet() {
 function stopFrame() { if (pet.raf) cancelAnimationFrame(pet.raf); pet.raf = 0; }
 function animate() {
     pet.raf = 0;
+    if (pet.pointer) {
+        drawPet();
+        pet.raf = requestAnimationFrame(animate);
+        return;
+    }
     pet.vx += -pet.pullX * .16; pet.vy += -pet.pullY * .16;
     pet.vx *= .78; pet.vy *= .78;
     pet.pullX += pet.vx; pet.pullY += pet.vy;
