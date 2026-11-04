@@ -38,8 +38,9 @@ body > #lp-panel.is-open{display:flex;opacity:1;transform:translate3d(-50%,-50%,
 /* 保留四角拖动热区与缩放逻辑，只隐藏角上的可见方框 */
 #lp-float .lp-float-resize:after{display:none}
 
-.lp-eraser-tools{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--lp-border);border-radius:12px;background:color-mix(in srgb,var(--lp-panel) 94%,transparent);font-size:11px;color:var(--lp-text)}
-.lp-eraser-tools[hidden]{display:none}.lp-eraser-tools label{display:flex;align-items:center;gap:5px;white-space:nowrap}.lp-eraser-tools input{width:90px;accent-color:var(--lp-accent)}.lp-eraser-tools output{min-width:30px;color:var(--lp-muted)}.lp-eraser-tools button{border:1px solid var(--lp-border);border-radius:8px;padding:6px 10px;background:#ffffff0b;color:var(--lp-text);font:inherit}.lp-eraser-tools button:disabled{opacity:.4}.lp-eraser-canvas{position:absolute;z-index:8;display:block;touch-action:none;cursor:crosshair;user-select:none}
+.lp-eraser-tools{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:center;gap:9px 14px;padding:10px 12px;border:1px solid var(--lp-border);border-radius:12px;background:color-mix(in srgb,var(--lp-panel) 94%,transparent);font-size:11px;color:var(--lp-text)}
+.lp-eraser-tools[hidden]{display:none}.lp-eraser-tools label{display:grid;grid-template-columns:max-content minmax(36px,1fr) 34px;align-items:center;gap:6px;min-width:0;white-space:nowrap}.lp-eraser-tools input{width:100%;min-width:0;margin:0;accent-color:var(--lp-accent)}.lp-eraser-tools output{min-width:34px;text-align:right;color:var(--lp-muted);font-variant-numeric:tabular-nums}.lp-eraser-tools>div{grid-column:1/-1;display:flex;justify-content:center;gap:8px}.lp-eraser-tools button{border:1px solid var(--lp-border);border-radius:8px;padding:6px 10px;background:#ffffff0b;color:var(--lp-text);font:inherit}.lp-eraser-tools button:disabled{opacity:.4}.lp-eraser-canvas{position:absolute;z-index:8;display:block;touch-action:none;cursor:crosshair;user-select:none}
+@media(max-width:420px){.lp-eraser-tools{gap:8px 10px;padding:9px}.lp-eraser-tools label{grid-template-columns:max-content minmax(30px,1fr) 32px;gap:4px;font-size:10px}}
 
 .dd-jb-row[hidden]{display:none}
 
