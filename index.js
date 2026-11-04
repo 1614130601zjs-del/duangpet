@@ -65,11 +65,11 @@ function ddAttachJelly(img){
  if(wantPointer){img.draggable=false;img.style.touchAction='none';img.style.webkitUserDrag='none';}
  const MW=DD_JELLY_MW,MH=DD_JELLY_MH;
  let canvas=null,selCv=null,gl=null,prog=null,posBuf=null,idxCount=0,tex=null,texSrc='',cols=0,rows=0,pos=null,locPos=0,boxW=0,boxH=0,failed=false;
- let raf=0,press=null,cx=0,cy=0,lx=0,ly=0,ofx=null,ofy=null,ovx=null,ovy=null,mv=null,shw=null,shown=false;
+ let raf=0,press=null,cx=0,cy=0,lx=0,ly=0,ofx=null,ofy=null,ovx=null,ovy=null,mv=null,shw=null,shown=false;const originalVisibility=img.style.visibility;
  const dep={x:0,v:0,t:0,k:.3,d:.6},ox={x:0,v:0,t:0,k:.3,d:.7},oy={x:0,v:0,t:0,k:.3,d:.7};
  const aff={x:[0,0,1,1,0],v:[0,0,0,0,0],t:[0,0,1,1,0]};
  const shk={x:0,y:0,vx:0,vy:0};
- const destroy=()=>{cancelAnimationFrame(raf);raf=0;try{canvas?.remove();}catch{}try{selCv?.remove();}catch{}canvas=null;selCv=null;gl=null;};
+ const destroy=()=>{cancelAnimationFrame(raf);raf=0;img.style.visibility=originalVisibility;try{canvas?.remove();}catch{}try{selCv?.remove();}catch{}canvas=null;selCv=null;gl=null;};
  ac.signal.addEventListener('abort',destroy);
  const box=()=>{
   const r=img.getBoundingClientRect(),cs=getComputedStyle(img);
@@ -203,9 +203,9 @@ function ddAttachJelly(img){
   if(ofx){for(let k=0;k<ofx.length;k++){if(!press||!press.smudging){ovx[k]+=(0-ofx[k])*.12;ovy[k]+=(0-ofy[k])*.12;ovx[k]*=.8;ovy[k]*=.8;ofx[k]+=ovx[k];ofy[k]+=ovy[k];}if(Math.abs(ofx[k])>.02||Math.abs(ofy[k])>.02||Math.abs(ovx[k])>.01||Math.abs(ovy[k])>.01)live=true;}}
   draw();
   if(live||(press&&!press.paint))raf=requestAnimationFrame(tick);
-  else{raf=0;canvas.style.display='none';shown=false;resetAll();}
+  else{raf=0;canvas.style.display='none';img.style.visibility=originalVisibility;shown=false;resetAll();}
  };
- const show=()=>{if(canvas&&!shown){canvas.style.display='block';shown=true;}};
+ const show=()=>{if(canvas&&!shown){canvas.style.display='block';img.style.visibility='hidden';shown=true;}};
  const kick=()=>{if(!raf)raf=requestAnimationFrame(tick);};
  const local=e=>{const r=img.getBoundingClientRect(),bx=box();return [Math.max(0,Math.min(boxW,e.clientX-r.left-bx.left)),Math.max(0,Math.min(boxH,e.clientY-r.top-bx.top))];};
  // 涂选区：自由手绘，高斯笔刷取最大值，边缘柔和
