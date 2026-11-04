@@ -447,7 +447,7 @@ async function setPetImage(blob){
  if(!blob)return;detachPet();await dbPut('pet-image',blob);if(petUrl)URL.revokeObjectURL(petUrl);petUrl=URL.createObjectURL(blob);
  const made=makePetRoot(petUrl);petRoot=made.root;petImage=made.img;const stage=document.querySelector('#lp-stage');stage.replaceChildren(petRoot);
  await new Promise((resolve,reject)=>{petImage.onload=resolve;petImage.onerror=()=>reject(new Error('图片载入失败'));});
- ddBuildBar(petRoot);await restoreMask(petImage);document.querySelector('#lp-empty').hidden=true;
+ ddBuildBar(petRoot);petRoot._ddPaintBar?.();await restoreMask(petImage);petRoot._ddPaintBar?.();document.querySelector('#lp-empty').hidden=true;
 }
 function mount(){
  if(document.querySelector('#little-pet-root'))return;
