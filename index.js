@@ -440,7 +440,7 @@ async function dbDelete(key){const db=await openAssetDB();return new Promise((re
 let maskSaveTimer=0;
 function ddPersistMask(img,S){if(!img||!S)return;clearTimeout(maskSaveTimer);maskSaveTimer=setTimeout(()=>{dbPut('pet-mask',{mask:Array.from(S.mask),has:S.has}).catch(e=>console.warn('[小小桌宠] 选区保存失败',e));},180);}
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-let petUrl='',petRoot=null,petImage=null,petFloat=null;
+let petUrl='',petRoot=null,petImage=null,petFloat=null,petFloatState=null;
 function saveCfg(){try{saveSettingsDebounced();}catch{}}
 function toast(t){const el=document.querySelector('#lp-toast');if(!el)return;el.textContent=t;el.classList.add('is-visible');clearTimeout(el._timer);el._timer=setTimeout(()=>el.classList.remove('is-visible'),2100);}
 function detachPet(){if(petImage)petImage._ddJellyAbort?.abort();if(petFloat)petFloat.remove();petFloat=null;petRoot?.remove();petRoot=null;petImage=null;}
