@@ -516,6 +516,7 @@ function mount() {
         catch (err) { toast(err.message); }
     });
     root.querySelector('#lp-remove').addEventListener('click', async () => {
+        collapsePet();
         await clearPetImage(); await clearAsset('pet-mask'); stopFrame(); pet.pointer = null; pet.image = null;
         pet.maskCanvas = pet.maskCtx = pet.maskPixels = null;
         if (pet.url) URL.revokeObjectURL(pet.url); pet.url = '';
