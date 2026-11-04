@@ -17,8 +17,9 @@
 .lp-header b{font-size:17px;letter-spacing:.04em}
 .lp-header small{font-size:11px;color:var(--lp-muted)}
 .lp-close{width:30px;height:30px;border:1px solid var(--lp-border);border-radius:50%;background:transparent;color:var(--lp-text);font-size:20px;line-height:1;cursor:pointer}
-.lp-stage{position:relative;min-height:0;max-height:min(56dvh,560px);display:block;overflow:auto;overscroll-behavior:contain;touch-action:pan-x pan-y;border:1px solid var(--lp-border);border-radius:15px;background:radial-gradient(ellipse at 50% 45%,rgba(255,255,255,.055),transparent 70%),rgba(0,0,0,.08);background-image:linear-gradient(45deg,rgba(130,130,130,.055) 25%,transparent 25%),linear-gradient(-45deg,rgba(130,130,130,.055) 25%,transparent 25%),linear-gradient(45deg,transparent 75%,rgba(130,130,130,.055) 75%),linear-gradient(-45deg,transparent 75%,rgba(130,130,130,.055) 75%);background-size:20px 20px;background-position:0 0,0 10px,10px -10px,-10px 0}
-#lp-pet-canvas{display:none;width:0;height:0;max-width:none;max-height:none;margin:0 auto;touch-action:pan-x pan-y;user-select:none;-webkit-user-select:none;-webkit-user-drag:none;cursor:grab}
+.lp-stage{position:relative;min-height:0;height:min(56dvh,560px);max-height:min(56dvh,560px);display:block;overflow:auto;overscroll-behavior:contain;touch-action:pan-x pan-y;border:1px solid var(--lp-border);border-radius:15px;background:radial-gradient(ellipse at 50% 45%,rgba(255,255,255,.055),transparent 70%),rgba(0,0,0,.08);background-image:linear-gradient(45deg,rgba(130,130,130,.055) 25%,transparent 25%),linear-gradient(-45deg,rgba(130,130,130,.055) 25%,transparent 25%),linear-gradient(45deg,transparent 75%,rgba(130,130,130,.055) 75%),linear-gradient(-45deg,transparent 75%,rgba(130,130,130,.055) 75%);background-size:20px 20px;background-position:0 0,0 10px,10px -10px,-10px 0}
+#lp-canvas-wrap{position:relative;display:block;flex:none;margin:0 auto}
+#lp-pet-canvas{display:none;width:0;height:0;max-width:none;max-height:none;margin:0;touch-action:pan-x pan-y;user-select:none;-webkit-user-select:none;-webkit-user-drag:none;cursor:grab}
 #lp-pet-canvas:active{cursor:grabbing}
 .lp-empty{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:7px;width:100%;box-sizing:border-box;padding:28px 12px;text-align:center}
 .lp-empty[hidden]{display:none}
@@ -40,14 +41,14 @@
 #lp-toast.is-visible{opacity:1;transform:translate(-50%,0)}
 @media(max-width:480px){
  .lp-panel{padding:12px;border-radius:17px;gap:10px}
- .lp-stage{min-height:0;max-height:min(56dvh,560px)}
+ .lp-stage{min-height:0;height:min(56dvh,560px);max-height:min(56dvh,560px)}
  .lp-toolbar{gap:6px}
  .lp-toolbar button,.lp-file-label{padding:7px 9px;font-size:11px}
 }
 
 .lp-stage{position:relative}
 #lp-pet-canvas{position:relative;z-index:1}
-#lp-mask-overlay{position:absolute;left:50%;top:0;transform:translateX(-50%);z-index:2;display:none;max-width:100%;max-height:none;touch-action:none;pointer-events:none;cursor:crosshair}
+#lp-mask-overlay{position:absolute;left:0;top:0;transform:none;z-index:2;display:none;max-width:100%;max-height:none;touch-action:none;pointer-events:none;cursor:crosshair}
 .lp-mask-tools{display:flex;align-items:center;justify-content:center;gap:7px;flex-wrap:wrap;padding:10px;border:1px solid var(--lp-border);border-radius:12px;background:rgba(255,255,255,.025);font-size:12px}
 .lp-mask-tools>span{color:var(--lp-muted);margin-right:4px}
 .lp-mask-tools button{border:1px solid var(--lp-border);border-radius:8px;padding:6px 9px;background:transparent;color:var(--lp-text);font:inherit;font-size:11px}
@@ -61,4 +62,4 @@
 .lp-float-handle{display:flex;align-items:center;justify-content:space-between;gap:18px;width:100%;padding:2px 4px;color:rgba(255,255,255,.78);font-size:10px;letter-spacing:.04em;touch-action:none;cursor:grab;user-select:none}
 .lp-float-handle:active{cursor:grabbing}
 .lp-float-handle button{border:1px solid rgba(255,255,255,.2);border-radius:7px;padding:3px 8px;background:rgba(255,255,255,.08);color:#fff;font:inherit;font-size:10px}
-#lp-float #lp-pet-canvas{display:block;max-width:min(88vw,560px);max-height:none}
+#lp-float #lp-pet-canvas{display:block;max-width:none;max-height:none}
