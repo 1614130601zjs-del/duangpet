@@ -383,7 +383,7 @@ function mount() {
         '<header class="lp-header"><div><b>小小桌宠</b><small>摸摸它，看看会不会 DUANG</small></div><button class="lp-close" type="button" aria-label="关闭">×</button></header>' +
         '<div class="lp-stage" id="lp-stage"><div class="lp-empty" id="lp-empty"><span class="lp-empty-mark">＋</span><b>放一张 PNG 进来</b><small>建议使用透明背景的角色立绘</small><button id="lp-upload" type="button">选择图片</button></div><canvas id="lp-pet-canvas" aria-label="触摸并拖动桌宠"></canvas><canvas id="lp-mask-overlay" aria-label="涂抹互动选区"></canvas></div>' +
         '<div class="lp-toolbar"><label class="lp-file-label">更换图片<input id="lp-file" type="file" accept="image/png,image/webp,image/jpeg"></label><button id="lp-reset" type="button">恢复形变</button><button id="lp-remove" type="button">移除图片</button></div>' +
-        '<div class="lp-mask-tools"><span>互动选区</span><button id="lp-mask-paint" type="button" class="is-active">涂抹选区</button><button id="lp-mask-erase" type="button">擦除选区</button><button id="lp-mask-clear" type="button">清空选区</button><button id="lp-mask-preview" type="button">互动预览</button><label>选区笔刷 <input id="lp-mask-brush" type="range" min="8" max="100" value="32"><output id="lp-mask-brush-value">32</output></label></div>' +
+        '<div class="lp-mask-tools"><span>互动选区</span><button id="lp-mask-paint" type="button" class="is-active">涂抹选区</button><button id="lp-mask-erase" type="button">擦除选区</button><button id="lp-mask-clear" type="button">清空选区</button><button id="lp-mask-preview" type="button">互动预览</button><button id="lp-mask-release" type="button">放出桌宠</button><label>选区笔刷 <input id="lp-mask-brush" type="range" min="8" max="100" value="32"><output id="lp-mask-brush-value">32</output></label></div>' +
         '<div class="lp-controls">' +
           '<label><span>笔刷范围 <output id="lp-brush-value"></output></span><input id="lp-brush" type="range" min="10" max="45" step="1"></label>' +
           '<label><span>拉扯力度 <output id="lp-strength-value"></output></span><input id="lp-strength" type="range" min="25" max="120" step="1"></label>' +
@@ -422,7 +422,16 @@ function mount() {
     ball.addEventListener('pointerup', ballEnd); ball.addEventListener('pointercancel', ballEnd);
     root.querySelector('.lp-close').addEventListener('click', close);
     root.querySelector('#lp-upload').addEventListener('click', () => root.querySelector('#lp-file').click());
+    const collapsePet = () => {
+        const floating = root.querySelector('#lp-float');
+        const canvas = root.querySelector('#lp-pet-canvas');
+        const overlay = root.querySelector('#lp-mask-overlay');
+        if (!floating || !canvas) return;
+        root.querySelector('#lp-stage').insertBefore(canvas, overlay);
+        floating.remove();
+    };
     const setMaskMode = mode => {
+        if (mode && root.querySelector('#lp-float')) collapsePet();
         maskMode = mode;
         root.querySelector('#lp-mask-paint').classList.toggle('is-active', mode === 'paint');
         root.querySelector('#lp-mask-erase').classList.toggle('is-active', mode === 'erase');
@@ -434,6 +443,55 @@ function mount() {
     root.querySelector('#lp-mask-paint').addEventListener('click', () => setMaskMode('paint'));
     root.querySelector('#lp-mask-erase').addEventListener('click', () => setMaskMode('erase'));
     root.querySelector('#lp-mask-preview').addEventListener('click', () => setMaskMode(null));
+    root.querySelector('#lp-mask-release').addEventListener('click', () => {
+        if (!pet.image) return toast('请先选择桌宠图片');
+        if (!pet.maskPixels || !pet.maskPixels.data.some((v, i) => i % 4 === 3 && v > 24)) return toast('先涂抹至少一块互动选区');
+        setMaskMode(null);
+        if (root.querySelector('#lp-float')) return;
+        const floating = document.createElement('div');
+        floating.id = 'lp-float';
+        floating.innerHTML = '<div class="lp-float-handle"><span>小小桌宠</span><button type="button" aria-label="收起桌宠">收起</button></div>';
+        floating.append(root.querySelector('#lp-pet-canvas'));
+        root.append(floating);
+        const c = cfg();
+        const place = () => {
+            const w = floating.offsetWidth || pet.width, h = floating.offsetHeight || pet.height + 30;
+            floating.style.left = clamp(Number(c.petFloatX ?? .72) * Math.max(0, innerWidth - w), 0, Math.max(0, innerWidth - w)) + 'px';
+            floating.style.top = clamp(Number(c.petFloatY ?? .68) * Math.max(0, innerHeight - h), 0, Math.max(0, innerHeight - h)) + 'px';
+        };
+        floating.querySelector('button').addEventListener('click', () => {
+            const canvas = root.querySelector('#lp-pet-canvas');
+            root.querySelector('#lp-stage').insertBefore(canvas, root.querySelector('#lp-mask-overlay'));
+            floating.remove();
+            setMaskMode('paint');
+        });
+        const handle = floating.querySelector('.lp-float-handle');
+        let drag = null;
+        handle.addEventListener('pointerdown', e => {
+            if (e.target.closest('button')) return;
+            const r = floating.getBoundingClientRect();
+            drag = { id:e.pointerId, dx:e.clientX-r.left, dy:e.clientY-r.top };
+            try { handle.setPointerCapture(e.pointerId); } catch {}
+        });
+        handle.addEventListener('pointermove', e => {
+            if (!drag || drag.id !== e.pointerId) return;
+            floating.style.left = clamp(e.clientX-drag.dx, 0, innerWidth-floating.offsetWidth) + 'px';
+            floating.style.top = clamp(e.clientY-drag.dy, 0, innerHeight-floating.offsetHeight) + 'px';
+        });
+        const end = e => {
+            if (!drag || drag.id !== e.pointerId) return;
+            drag = null;
+            const r = floating.getBoundingClientRect();
+            c.petFloatX = r.left / Math.max(1, innerWidth-floating.offsetWidth);
+            c.petFloatY = r.top / Math.max(1, innerHeight-floating.offsetHeight);
+            save();
+        };
+        handle.addEventListener('pointerup', end);
+        handle.addEventListener('pointercancel', end);
+        place();
+        window.addEventListener('resize', place);
+        toast('桌宠已放出，可以直接触摸选区互动');
+    });
     root.querySelector('#lp-mask-clear').addEventListener('click', async () => {
         if (!pet.maskCtx) return;
         pet.maskCtx.clearRect(0, 0, pet.maskCanvas.width, pet.maskCanvas.height);
@@ -474,7 +532,7 @@ function mount() {
     placeBall();
     window.addEventListener('resize', () => { placeBall(); if (pet.image) prepareCanvas(); });
     getPetImage().then(blob => {
-        if (blob) setImage(blob).then(() => { root.querySelector('#lp-empty').hidden = true; })
+        if (blob) setImage(blob).then(() => { root.querySelector('#lp-empty').hidden = true; setMaskMode('paint'); })
             .catch(err => toast(err.message || '上次的桌宠图片载入失败'));
     }).catch(err => console.warn('[小小桌宠] 本地图片仓库不可用', err));
 }
