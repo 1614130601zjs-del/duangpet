@@ -135,12 +135,13 @@ function uploadTexture() {
 function prepareCanvas() {
     const canvas = document.querySelector('#lp-pet-canvas');
     if (!canvas || !pet.image) return false;
-    const maxW = Math.min(window.innerWidth * .88, 560);
-    // 仅按可用宽度等比缩放，不限制高度；舞台和面板随原图比例自然展开。
-    const scale = Math.min(maxW / pet.image.naturalWidth, 1);
+    // 保留原图像素尺寸，超出视口的部分在舞台内部滚动查看。
+    const scale = 1;
     const w = Math.max(1, Math.round(pet.image.naturalWidth * scale));
     const h = Math.max(1, Math.round(pet.image.naturalHeight * scale));
     canvas.style.width = w + 'px'; canvas.style.height = h + 'px'; canvas.style.display = 'block';
+    const wrap = document.querySelector('#lp-canvas-wrap');
+    if (wrap) { wrap.style.width = w + 'px'; wrap.style.height = h + 'px'; }
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
     pet.width = w; pet.height = h;
@@ -165,7 +166,9 @@ function drawPet() {
     if (!gl || !pet.positions) return;
     const c = cfg();
     const brushRadius = Math.max(12, Math.min(pet.width, pet.height) * Number(c.brush) / 100);
-    const feedbackRadius = brushRadius * clamp(Number(c.feedback) / 100, .5, 2.5);
+    // 反馈范围独立于选区笔刷，按 duang 原版局部高斯反馈半径调节。
+    const feedbackScale = clamp(Number(c.feedback) / 100, .5, 2.5);
+    const feedbackRadius = Math.max(8, Math.min(pet.width, pet.height) * .17 * feedbackScale);
     const radius2 = feedbackRadius * feedbackRadius;
     const softness = clamp(Number(c.softness) / 100, .25, 1);
     const displacement = Math.hypot(pet.pullX, pet.pullY);
@@ -384,12 +387,12 @@ function mount() {
     root.innerHTML = '<button id="lp-ball" type="button" aria-label="打开小小桌宠" title="小小桌宠">' + BALL + '</button>' +
       '<section id="lp-panel" class="lp-panel" aria-hidden="true">' +
         '<header class="lp-header"><div><b>小小桌宠</b><small>摸摸它，看看会不会 DUANG</small></div><button class="lp-close" type="button" aria-label="关闭">×</button></header>' +
-        '<div class="lp-stage" id="lp-stage"><div class="lp-empty" id="lp-empty"><span class="lp-empty-mark">＋</span><b>放一张 PNG 进来</b><small>建议使用透明背景的角色立绘</small><button id="lp-upload" type="button">选择图片</button></div><canvas id="lp-pet-canvas" aria-label="触摸并拖动桌宠"></canvas><canvas id="lp-mask-overlay" aria-label="涂抹互动选区"></canvas></div>' +
+        '<div class="lp-stage" id="lp-stage"><div class="lp-empty" id="lp-empty"><span class="lp-empty-mark">＋</span><b>放一张 PNG 进来</b><small>建议使用透明背景的角色立绘</small><button id="lp-upload" type="button">选择图片</button></div><div id="lp-canvas-wrap"><canvas id="lp-pet-canvas" aria-label="触摸并拖动桌宠"></canvas><canvas id="lp-mask-overlay" aria-label="涂抹互动选区"></canvas></div></div>' +
         '<div class="lp-toolbar"><label class="lp-file-label">更换图片<input id="lp-file" type="file" accept="image/png,image/webp,image/jpeg"></label><button id="lp-reset" type="button">恢复形变</button><button id="lp-remove" type="button">移除图片</button></div>' +
         '<div class="lp-mask-tools"><span>互动选区</span><button id="lp-mask-paint" type="button" class="is-active">涂抹选区</button><button id="lp-mask-erase" type="button">擦除选区</button><button id="lp-mask-clear" type="button">清空选区</button><button id="lp-mask-preview" type="button">互动预览</button><button id="lp-mask-release" type="button">放出桌宠</button><label>选区笔刷 <input id="lp-mask-brush" type="range" min="8" max="100" value="32"><output id="lp-mask-brush-value">32</output></label></div>' +
         '<div class="lp-controls">' +
           '<label><span>笔刷范围 <output id="lp-brush-value"></output></span><input id="lp-brush" type="range" min="10" max="45" step="1"></label>' +
-          '<label><span>拉扯力度 <output id="lp-strength-value"></output></span><input id="lp-strength" type="range" min="25" max="120" step="1"></label>' +
+          '<label><span>摇晃强度 <output id="lp-strength-value"></output></span><input id="lp-strength" type="range" min="25" max="120" step="1"></label>' +
           '<label><span>边缘柔和 <output id="lp-softness-value"></output></span><input id="lp-softness" type="range" min="30" max="100" step="1"></label>' +
           '<label><span>反馈范围 <output id="lp-feedback-value"></output></span><input id="lp-feedback" type="range" min="50" max="250" step="5"></label>' +
           '<p>先涂抹角色上允许互动的区域，再切换到互动预览。只有选区内可以拖动，选区外不会形变。</p></div><div id="lp-toast" role="status" aria-live="polite"></div></section>';
@@ -431,7 +434,7 @@ function mount() {
         const canvas = root.querySelector('#lp-pet-canvas');
         const overlay = root.querySelector('#lp-mask-overlay');
         if (!floating || !canvas) return;
-        root.querySelector('#lp-stage').insertBefore(canvas, overlay);
+        root.querySelector('#lp-canvas-wrap').append(canvas);
         floating.remove();
     };
     const setMaskMode = mode => {
@@ -465,7 +468,7 @@ function mount() {
         };
         floating.querySelector('button').addEventListener('click', () => {
             const canvas = root.querySelector('#lp-pet-canvas');
-            root.querySelector('#lp-stage').insertBefore(canvas, root.querySelector('#lp-mask-overlay'));
+            root.querySelector('#lp-canvas-wrap').append(canvas);
             floating.remove();
             setMaskMode('paint');
         });
