@@ -47,7 +47,7 @@
 
 .lp-stage{position:relative}
 #lp-pet-canvas{position:relative;z-index:1}
-#lp-mask-overlay{position:absolute;z-index:2;display:none;max-width:100%;max-height:56dvh;touch-action:none;pointer-events:none;cursor:crosshair}
+#lp-mask-overlay{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:2;display:none;max-width:100%;max-height:56dvh;touch-action:none;pointer-events:none;cursor:crosshair}
 .lp-mask-tools{display:flex;align-items:center;justify-content:center;gap:7px;flex-wrap:wrap;padding:10px;border:1px solid var(--lp-border);border-radius:12px;background:rgba(255,255,255,.025);font-size:12px}
 .lp-mask-tools>span{color:var(--lp-muted);margin-right:4px}
 .lp-mask-tools button{border:1px solid var(--lp-border);border-radius:8px;padding:6px 9px;background:transparent;color:var(--lp-text);font:inherit;font-size:11px}
