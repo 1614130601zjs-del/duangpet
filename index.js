@@ -373,7 +373,7 @@ function ddBuildBar(overlay,mountPoint=overlay){
     +'<div class="dd-jb-msg" role="status"></div></div>';
    const $b=sel=>bar.querySelector(sel);
    const setMsg=t=>{$b('.dd-jb-msg').textContent=t||'';};
-   const feedbackInput=$b('[data-jb-feedback]');if(feedbackInput){feedbackInput.value=String(ddCfg().feedbackRange||100);$b('[data-jb-feedback-value]').textContent=feedbackInput.value+'%';}
+   const feedbackInput=$b('[data-jb-feedback]');const syncFeedbackRange=input=>{if(!input)return;const min=Number(input.min)||50,max=Number(input.max)||250,value=Math.max(min,Math.min(max,Number(input.value)||min)),pct=(value-min)/(max-min)*100;input.style.setProperty('--feedback-progress',pct+'%');$b('[data-jb-feedback-value]').textContent=min+'%—'+value+'%';};if(feedbackInput){feedbackInput.value=String(ddCfg().feedbackRange||100);syncFeedbackRange(feedbackInput);}
    const paintBar=()=>{
     const c=ddJellyCfg(),img=overlay.querySelector('img'),S=img?ddJellyState(img):{has:false,selecting:false};
     $b('[data-jb=power]').textContent=c.on?'果冻：开':'果冻：关';$b('[data-jb=power]').classList.toggle('is-active',c.on);
@@ -389,7 +389,7 @@ function ddBuildBar(overlay,mountPoint=overlay){
    const syncSettings=()=>{const sel=document.querySelector('#dd-strength');if(sel)sel.value=['soft','bouncy'].includes(ddCfg().jellyStrength)?ddCfg().jellyStrength:'mid';};
    const rebind=()=>{ddAttachJelly(overlay.querySelector('img'));paintBar();syncSettings();};
    bar.addEventListener('input',e=>{
-    const fi=e.target.closest('[data-jb-feedback]');if(fi){ddCfg().feedbackRange=Number(fi.value);ddSave();$b('[data-jb-feedback-value]').textContent=fi.value+'%';const img=overlay.querySelector('img');if(img)ddAttachJelly(img);return;}
+    const fi=e.target.closest('[data-jb-feedback]');if(fi){ddCfg().feedbackRange=Number(fi.value);ddSave();syncFeedbackRange(fi);const img=overlay.querySelector('img');if(img)ddAttachJelly(img);return;}
     const bi=e.target.closest('[data-jb-brush]');if(!bi)return;e.stopPropagation();
     ddCfg().jellyBrush=Number(bi.value)/100;ddSave();
     // 临时画一个圈让你看到当前粗细
