@@ -311,7 +311,7 @@ function bindMaskEditor() {
     const stroke = (x, y) => {
         if (!pet.maskCtx) return;
         const size = Number(document.querySelector('#lp-mask-brush')?.value || 32);
-        const radius = Math.max(2, Math.min(pet.maskCanvas.width, pet.maskCanvas.height) * size / 100);
+        const rect = overlay.getBoundingClientRect();\n        const radius = Math.max(2, size * pet.maskCanvas.width / Math.max(1, rect.width));
         const g = pet.maskCtx.createRadialGradient(x, y, 0, x, y, radius);
         g.addColorStop(0, 1); g.addColorStop(.68, .82); g.addColorStop(1, 0);
         pet.maskCtx.save();
@@ -344,7 +344,7 @@ function bindMaskEditor() {
 function setImage(blob) {
     return new Promise((resolve, reject) => {
         const url = URL.createObjectURL(blob), img = new Image();
-        img.onload = () => {
+        img.onload = async () => {
             if (pet.url) URL.revokeObjectURL(pet.url);
             pet.url = url; pet.image = img;
             try {
@@ -378,7 +378,7 @@ function mount() {
     root.innerHTML = '<button id="lp-ball" type="button" aria-label="打开小小桌宠" title="小小桌宠">' + BALL + '</button>' +
       '<section id="lp-panel" class="lp-panel" aria-hidden="true">' +
         '<header class="lp-header"><div><b>小小桌宠</b><small>摸摸它，看看会不会 DUANG</small></div><button class="lp-close" type="button" aria-label="关闭">×</button></header>' +
-        '<div class="lp-stage" id="lp-stage"><div class="lp-empty" id="lp-empty"><span class="lp-empty-mark">＋</span><b>放一张 PNG 进来</b><small>建议使用透明背景的角色立绘</small><button id="lp-upload" type="button">选择图片</button></div><canvas id="lp-pet-canvas" aria-label="触摸并拖动桌宠"></canvas></div>' +
+        '<div class="lp-stage" id="lp-stage"><div class="lp-empty" id="lp-empty"><span class="lp-empty-mark">＋</span><b>放一张 PNG 进来</b><small>建议使用透明背景的角色立绘</small><button id="lp-upload" type="button">选择图片</button></div><canvas id="lp-pet-canvas" aria-label="触摸并拖动桌宠"></canvas><canvas id="lp-mask-overlay" aria-label="涂抹互动选区"></canvas></div>' +
         '<div class="lp-toolbar"><label class="lp-file-label">更换图片<input id="lp-file" type="file" accept="image/png,image/webp,image/jpeg"></label><button id="lp-reset" type="button">恢复形变</button><button id="lp-remove" type="button">移除图片</button></div>' +
         '<div class="lp-mask-tools"><span>互动选区</span><button id="lp-mask-paint" type="button" class="is-active">涂抹选区</button><button id="lp-mask-erase" type="button">擦除选区</button><button id="lp-mask-clear" type="button">清空选区</button><button id="lp-mask-preview" type="button">互动预览</button><label>选区笔刷 <input id="lp-mask-brush" type="range" min="8" max="100" value="32"><output id="lp-mask-brush-value">32</output></label></div>' +
         '<div class="lp-controls">' +
