@@ -427,7 +427,7 @@ function mount() {
         '<div class="lp-toolbar"><label class="lp-file-label">更换图片<input id="lp-file" type="file" accept="image/png,image/webp,image/jpeg"></label><button id="lp-reset" type="button">恢复形变</button><button id="lp-remove" type="button">移除图片</button></div>' +
         '<div class="lp-mask-tools"><span>互动选区</span><button id="lp-mask-paint" type="button" class="is-active">涂抹选区</button><button id="lp-mask-erase" type="button">擦除选区</button><button id="lp-mask-clear" type="button">清空选区</button><button id="lp-mask-preview" type="button">互动预览</button><button id="lp-mask-release" type="button">放出桌宠</button><label>选区笔刷 <input id="lp-mask-brush" type="range" min="8" max="100" value="32"><output id="lp-mask-brush-value">32</output></label></div>' +
         '<div class="lp-controls"><button id="lp-shake-toggle" type="button">开启摇晃互动</button>' +
-          '<label><span>笔刷范围 <output id="lp-brush-value"></output></span><input id="lp-brush" type="range" min="10" max="45" step="1"></label>' +
+          '<label><span>拖动幅度 <output id="lp-brush-value"></output></span><input id="lp-brush" type="range" min="10" max="45" step="1"></label>' +
           '<label><span>摇晃强度 <output id="lp-strength-value"></output></span><input id="lp-strength" type="range" min="25" max="120" step="1"></label>' +
           '<label><span>边缘柔和 <output id="lp-softness-value"></output></span><input id="lp-softness" type="range" min="30" max="100" step="1"></label>' +
           '<label><span>反馈范围 <output id="lp-feedback-value"></output></span><input id="lp-feedback" type="range" min="50" max="250" step="5"></label>' +
@@ -571,6 +571,7 @@ function mount() {
         if (cfg().shake) applyMotionShake();
         else { if (pet.motionHandler) window.removeEventListener('devicemotion', pet.motionHandler); pet.motionHandler = null; toast('摇晃互动已关闭'); }
     });
+    if (cfg().shake) { cfg().shake = false; save(); } // 传感器权限必须由用户主动点击重新授权。
     syncShakeButton();
     for (const key of ['brush', 'strength', 'softness', 'feedback']) {
         const input = root.querySelector('#lp-' + key), output = root.querySelector('#lp-' + key + '-value');
