@@ -563,7 +563,7 @@ function mount(){
   const container=document.createElement('div');container.id='little_pet_wand_container';container.className='extension_container';
   const item=document.createElement('div');item.id='little_pet_wand';item.className='list-group-item flex-container flexGap5';
   const icon=document.createElement('div');icon.className='fa-solid fa-paw extensionsMenuExtensionButton';
-  item.append(icon,document.createTextNode('小小桌宠'));
+  item.append(icon,document.createTextNode('摇起来'));
   item.addEventListener('click',()=>panel.classList.contains('is-open')?close():open());
   container.append(item);menu.append(container);return true;
  };
