@@ -5,7 +5,7 @@ import { extension_settings } from '/scripts/extensions.js';
 import { saveSettingsDebounced } from '/script.js';
 
 const EXT = 'littlepet';
-const DEFAULTS = { enabled: true, ballX: 1, ballY: .58, brush: 24, strength: 72, softness: 76 };
+const DEFAULTS = { enabled: true, ballX: 1, ballY: .58, brush: 24, strength: 72, softness: 76, feedback: 100 };
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 function cfg() {
     if (!extension_settings[EXT]) extension_settings[EXT] = {};
@@ -165,7 +165,8 @@ function drawPet() {
     if (!gl || !pet.positions) return;
     const c = cfg();
     const brushRadius = Math.max(12, Math.min(pet.width, pet.height) * Number(c.brush) / 100);
-    const radius2 = brushRadius * brushRadius;
+    const feedbackRadius = brushRadius * clamp(Number(c.feedback) / 100, .5, 2.5);
+    const radius2 = feedbackRadius * feedbackRadius;
     const softness = clamp(Number(c.softness) / 100, .25, 1);
     const displacement = Math.hypot(pet.pullX, pet.pullY);
     for (let y = 0; y <= pet.rows; y++) for (let x = 0; x <= pet.cols; x++) {
@@ -390,6 +391,7 @@ function mount() {
           '<label><span>笔刷范围 <output id="lp-brush-value"></output></span><input id="lp-brush" type="range" min="10" max="45" step="1"></label>' +
           '<label><span>拉扯力度 <output id="lp-strength-value"></output></span><input id="lp-strength" type="range" min="25" max="120" step="1"></label>' +
           '<label><span>边缘柔和 <output id="lp-softness-value"></output></span><input id="lp-softness" type="range" min="30" max="100" step="1"></label>' +
+          '<label><span>反馈范围 <output id="lp-feedback-value"></output></span><input id="lp-feedback" type="range" min="50" max="250" step="5"></label>' +
           '<p>先涂抹角色上允许互动的区域，再切换到互动预览。只有选区内可以拖动，选区外不会形变。</p></div><div id="lp-toast" role="status" aria-live="polite"></div></section>';
     document.body.append(root);
     const panel = root.querySelector('#lp-panel'), ball = root.querySelector('#lp-ball');
@@ -524,7 +526,7 @@ function mount() {
         canvas.width = 1; canvas.height = 1; canvas.style.width = '0'; canvas.style.height = '0'; canvas.style.display = 'none';
         root.querySelector('#lp-empty').hidden = false; toast('已移除桌宠图片');
     });
-    for (const key of ['brush', 'strength', 'softness']) {
+    for (const key of ['brush', 'strength', 'softness', 'feedback']) {
         const input = root.querySelector('#lp-' + key), output = root.querySelector('#lp-' + key + '-value');
         input.value = cfg()[key]; output.value = cfg()[key] + '%';
         input.addEventListener('input', () => {
