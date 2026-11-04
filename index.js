@@ -443,7 +443,7 @@ const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 let petUrl='',petRoot=null,petImage=null,petFloat=null,petFloatState=null;
 function saveCfg(){try{saveSettingsDebounced();}catch{}}
 function toast(t){const el=document.querySelector('#lp-toast');if(!el)return;el.textContent=t;el.classList.add('is-visible');clearTimeout(el._timer);el._timer=setTimeout(()=>el.classList.remove('is-visible'),2100);}
-function detachPet(){if(petImage)petImage._ddJellyAbort?.abort();if(petFloat)petFloat.remove();petFloat=null;petRoot?.remove();petRoot=null;petImage=null;}
+function detachPet(){if(petImage)petImage._ddJellyAbort?.abort();if(petFloat)petFloat.remove();petFloat=null;petFloatState=null;petRoot?.remove();petRoot=null;petImage=null;}
 function restoreMask(img){return dbGet('pet-mask').then(saved=>{const S=ddJellyState(img);if(saved&&Array.isArray(saved.mask)&&saved.mask.length===S.mask.length){S.mask.set(saved.mask);S.has=!!saved.has;}else{S.mask.fill(0);S.has=false;}ddAttachJelly(img);});}
 function makePetRoot(url){const root=document.createElement('div');root.className='lp-interaction';root.innerHTML='<div class="lp-image-host"><img alt="小小桌宠" draggable="false"></div>';const img=root.querySelector('img');img.src=url;return {root,img};}
 async function setPetImage(blob){
