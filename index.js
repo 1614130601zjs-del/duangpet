@@ -145,6 +145,8 @@ function ddAttachJelly(img){
  const ensure=()=>{
   if(failed)return false;
   try{
+   // 手机偶尔会收回 WebGL 画布（切后台/内存紧张），之后所有互动就都没反应了：发现丢了就重建。
+   if(canvas&&gl&&gl.isContextLost&&gl.isContextLost()){destroy();texSrc='';idxCount=0;cols=0;rows=0;prog=null;tex=null;posBuf=null;shown=false;}
    const bx=box();
    if(!canvas){
     const host=img.offsetParent||img.parentElement;if(!host)throw new Error('no host');
@@ -634,8 +636,8 @@ function mount(){
  // 将操作面板直接挂到 body，脱离酒馆可能带有 transform 的扩展容器，避免 fixed 定位偏移。
  document.body.append(panel);
  const rememberFloatState=f=>{if(!f)return;const r=f.getBoundingClientRect();petFloatState={left:r.left,top:r.top,width:r.width,height:r.height,scale:f._lpCurrentScale||1};};
- const returnPetToEditor=()=>{if(!petFloat||!petRoot)return false;rememberFloatState(petFloat);petFloat.remove();petFloat=null;petRoot.style.transform='';petRoot.style.transformOrigin='';panel.querySelector('#lp-stage').append(petRoot);petImage._ddJellyRehost?.();petRoot._ddPaintBar?.();return true;};
- const open=()=>{if(petFloat)returnPetToEditor();panel.classList.add('is-open');panel.setAttribute('aria-hidden','false');requestAnimationFrame(()=>petImage?._ddJellyRehost?.());};
+ const returnPetToEditor=()=>{if(!petFloat||!petRoot)return false;rememberFloatState(petFloat);petFloat.remove();petFloat=null;petRoot.style.transform='';petRoot.style.transformOrigin='';panel.querySelector('#lp-stage').append(petRoot);petImage._ddJellyRehost?.();ddAttachJelly(petImage);petImage._ddJellyPrepare?.();petRoot._ddPaintBar?.();return true;};
+ const open=()=>{if(petFloat)returnPetToEditor();panel.classList.add('is-open');panel.setAttribute('aria-hidden','false');requestAnimationFrame(()=>{if(!petImage)return;petImage._ddJellyRehost?.();ddAttachJelly(petImage);petImage._ddJellyPrepare?.();});};
  const close=()=>{if(petEraser)ddSetEraser(false);panel.classList.remove('is-open');panel.setAttribute('aria-hidden','true');};
  const injectWandButton=()=>{
   const menu=document.querySelector('#extensionsMenu');if(!menu)return false;
@@ -728,7 +730,7 @@ function mount(){
     });
     const finish=e=>{if(f._lpResizeDrag?.id===e.pointerId){f._lpResizeDrag=null;rememberFloatState(f);}};grip.addEventListener('pointerup',finish);grip.addEventListener('pointercancel',finish);
    });
-   petImage._ddJellyRehost?.();petRoot._ddPaintBar?.();rememberFloatState(f);
+   petImage._ddJellyRehost?.();ddAttachJelly(petImage);petImage._ddJellyPrepare?.();petRoot._ddPaintBar?.();rememberFloatState(f);
   });
   close();
  });
