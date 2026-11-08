@@ -2,7 +2,7 @@ import { extension_settings } from '/scripts/extensions.js';
 import { saveSettingsDebounced } from '/script.js';
 
 const EXT='littlepet';
-const defaults={enabled:true,jellyOn:true,jellyScope:'local',jellyTap:true,jellyDrag:true,jellyShake:false,jellyStrength:'mid',jellyBrush:.075,feedbackRange:100,shakeMode:'select',pinFixed:30};
+const defaults={enabled:true,jellyOn:true,jellyScope:'local',jellyTap:true,jellyDrag:true,jellyShake:false,jellyStrength:'mid',jellyBrush:.075,feedbackRange:100,shakeMode:'select',pinFixed:30,jellyBurst:false,jellyBurstN:3,jellyBurstMode:'wobble',jellyBurstDecay:true,jellyBurstPower:1};
 function ddCfg(){
  if(!extension_settings[EXT])extension_settings[EXT]={};
  const c=extension_settings[EXT];
@@ -29,7 +29,19 @@ function ddJellyCfg(){
  if(typeof c.jellyTap!=='boolean')c.jellyTap=true;
  if(typeof c.jellyDrag!=='boolean')c.jellyDrag=true;
  if(typeof c.jellyShake!=='boolean')c.jellyShake=false;
- return {on:c.jellyOn,scope:'local',tap:true,drag:c.jellyDrag,shake:c.jellyShake,amp:{soft:.35,mid:.5,bouncy:.65}[c.jellyStrength]||.5};
+ return {burst:c.jellyBurst===true,on:c.jellyOn,scope:'local',tap:true,drag:c.jellyDrag,shake:c.jellyShake,amp:{soft:.35,mid:.5,bouncy:.65}[c.jellyStrength]||.5};
+}
+// 点一下连晃：两种模式——“摇晃”（随机方向推几下）/“按压反馈”（按压回弹，重复几次）。
+function ddBurstCfg(){const c=ddCfg();return{mode:c.jellyBurstMode==='press'?'press':'wobble',n:Math.max(1,Math.min(10,Math.round(Number(c.jellyBurstN)||3))),decay:c.jellyBurstDecay!==false,power:Math.max(.2,Math.min(2,Number(c.jellyBurstPower)||1))};}
+function ddBurst(img,pt){
+ const b=ddBurstCfg();let i=0;
+ const go=()=>{
+  if(!img.isConnected)return;
+  const fac=b.decay?(b.n>1?1-i/b.n*.82:1):1,k=b.power*fac;
+  if(b.mode==='press')img._ddPress?.(k,pt);else img._ddKick?.(k*.55);
+  if(++i<b.n)setTimeout(go,b.mode==='press'?420:230);
+ };
+ go();
 }
 function ddJellyBrush(){const b=Number(ddCfg().jellyBrush);return Number.isFinite(b)&&b>0?Math.max(.02,Math.min(.2,b)):.075;}
 function ddJellyState(img){
@@ -61,7 +73,7 @@ function ddAttachJelly(img){
  try{const pc=document.createElement('canvas');probeOk=!!(pc.getContext('webgl')||pc.getContext('experimental-webgl'));}catch{}
  if(!probeOk)return ddAttachJellyWhole(img,conf);
  const ac=new AbortController();img._ddJellyAbort=ac;const sig={signal:ac.signal};
- const wantPointer=conf.tap||conf.drag||S.selecting;
+ const wantPointer=conf.tap||conf.drag||conf.burst||S.selecting;
  if(wantPointer){img.draggable=false;img.style.touchAction='none';img.style.webkitUserDrag='none';}
  const MW=DD_JELLY_MW,MH=DD_JELLY_MH;
  let canvas=null,selCv=null,gl=null,prog=null,posBuf=null,idxCount=0,tex=null,texSrc='',cols=0,rows=0,pos=null,locPos=0,locSize=null,boxW=0,boxH=0,padX=0,padY=0,locOff=null,failed=false;
@@ -254,7 +266,7 @@ function ddAttachJelly(img){
  };
  img.addEventListener('pointerdown',e=>{
   if(e.pointerType==='mouse'&&e.button!==0)return;
-  if(!S.selecting&&!conf.tap&&!conf.drag)return;
+  if(!S.selecting&&!conf.tap&&!conf.drag&&!conf.burst)return;
   if(!ensure()){if(failed)ddAttachJellyWhole(img,conf);return;}
   const [px,py]=local(e);
   try{img.setPointerCapture(e.pointerId);}catch{}
@@ -314,10 +326,18 @@ function ddAttachJelly(img){
    aff.t=[0,0,1,1,0];
   }
   kick();
+  if(conf.burst&&!S.selecting&&!p.moved&&Date.now()-p.t<450)ddBurst(img,[cx,cy]);
  };
  img.addEventListener('pointerup',end,sig);img.addEventListener('pointercancel',end,sig);
  img.addEventListener('contextmenu',e=>{if(press)e.preventDefault();},sig);
  if(S.selecting&&ensure()){selCv.style.display='block';paintSel();}
+ img._ddPress=(k,pt)=>{if(S.selecting||press)return;if(!ensure())return;show();k=Math.max(.15,Number(k)||1);
+  if(pt){cx=pt[0];cy=pt[1];}else if(!cx&&!cy){cx=boxW/2;cy=boxH/2;}
+  if(scope==='local')buildLocalInfluence();
+  Object.assign(dep,{k:.3,d:.6});Object.assign(ox,{k:.3,d:.7});Object.assign(oy,{k:.3,d:.7});ox.t=ox.x=0;oy.t=oy.x=0;ox.v=oy.v=0;
+  dep.t=Math.min(.6,.7*amp*k);kick();
+  setTimeout(()=>{Object.assign(dep,{k:.15,d:.78});dep.t=0;kick();},200);};
+ img._ddKick=(k)=>{if(S.selecting||press)return;if(!ensure())return;show();const s=Math.max(.15,Number(k)||1)*(amp/.5),r=()=>(Math.random()<.5?-1:1)*(.55+Math.random()*.45);shk.vx+=Math.max(-1.2,Math.min(1.2,r()*.5*s));shk.vy+=Math.max(-1.2,Math.min(1.2,r()*.5*s));shk.x=Math.max(-1.6,Math.min(1.6,shk.x));shk.y=Math.max(-1.6,Math.min(1.6,shk.y));kick();};
  // 摇晃手机：加速度推着选区（没选区时是整张图、边缘不动）晃，停了弹簧自己回来。
  if(conf.shake&&!S.selecting){
   let gx=0,gy=0,primed=false;
@@ -350,7 +370,7 @@ function ddAttachJellyWhole(img,conf){
  // 每次打开都按当前设置重新决定是否启用；上一次绑的监听用 AbortController 统一撤掉。
  img._ddJellyAbort?.abort();img._ddJellyAbort=null;
  img.style.transform='';img.style.touchAction='';img.style.transformOrigin='';
- if(!conf.on||(!conf.tap&&!conf.drag))return;
+ if(!conf.on||(!conf.tap&&!conf.drag&&!conf.burst))return;
  const ac=new AbortController();img._ddJellyAbort=ac;const sig={signal:ac.signal};
  img.draggable=false;img.style.touchAction='none';img.style.willChange='transform';img.style.webkitUserDrag='none';
  // 状态：x=[tx,ty,sx,sy,rot]，v=速度，t=目标
@@ -416,8 +436,9 @@ function ddBuildBar(overlay,mountPoint=overlay){
     +'<div class="dd-jb-panel" hidden><div class="dd-jb-row" data-jb-selection-row><b>选区</b><button type="button" data-jb="sel">✎ 涂选区</button><button type="button" data-jb="clr2">清除</button><em class="dd-jb-hint"></em></div>'
     +'<div class="dd-jb-row"><b>反馈</b><label class="dd-jb-feedback"><input type="range" min="10" max="250" step="5" data-jb-feedback aria-label="反馈范围"><output data-jb-feedback-value>100%</output></label></div>'
     +'<div class="dd-jb-row"><b>晃动</b><button type="button" data-jb-mode="select">选区</button><button type="button" data-jb-mode="pin">固定底部</button></div>'
+    +'<div class="dd-jb-row" data-jb-burstrow><b>连晃</b><select data-jb-bmode aria-label="连晃模式"><option value="wobble">摇晃</option><option value="press">点击反馈</option></select><label class="dd-jb-feedback"><input type="range" min="1" max="10" step="1" data-jb-bn aria-label="次数"><output data-jb-bn-v></output></label><label class="dd-jb-feedback"><input type="range" min="20" max="200" step="5" data-jb-bpow aria-label="幅度"><output data-jb-bpow-v></output></label><label class="dd-jb-feedback"><input type="checkbox" data-jb-bdecay> 越晃越弱</label></div>'
     +'<div class="dd-jb-row" data-jb-pinrow hidden><b>固定</b><label class="dd-jb-feedback"><input type="range" min="0" max="70" step="1" data-jb-pin aria-label="底部固定比例"><output data-jb-pin-value>30%</output></label><em class="dd-jb-hint">底部这么多不动，上半身甩</em></div>'
-    +'<div class="dd-jb-row"><b>交互</b><button type="button" data-jb-in="drag">拖动</button><button type="button" data-jb-in="shake">摇晃</button>'
+    +'<div class="dd-jb-row"><b>交互</b><button type="button" data-jb-in="drag">拖动</button><button type="button" data-jb-in="shake">摇晃</button><button type="button" data-jb-in="burst" title="点一下图，自己连晃几下">点一下连晃</button>'
     +'<span class="dd-jb-dd"><button type="button" class="dd-jb-dd-btn" data-jb-dd aria-haspopup="listbox" aria-expanded="false"><span data-jb-dd-label>Q弹</span> ▾</button><span class="dd-jb-dd-list" role="listbox" hidden><button type="button" role="option" data-jb-strength="soft">软糯</button><button type="button" role="option" data-jb-strength="mid">Q弹</button><button type="button" role="option" data-jb-strength="bouncy">DUANG</button></span></span></div>'
     +'<div class="dd-jb-msg" role="status"></div></div></div>';
    const $b=sel=>bar.querySelector(sel);
@@ -427,7 +448,7 @@ function ddBuildBar(overlay,mountPoint=overlay){
      const c=ddJellyCfg(),img=overlay.querySelector('img'),S=img?ddJellyState(img):{has:false,selecting:false};
     $b('[data-jb=power]').textContent=c.on?'果冻：开':'果冻：关';$b('[data-jb=power]').classList.toggle('is-active',c.on);
     bar.classList.toggle('is-off',!c.on);bar.classList.toggle('is-selecting',!!S.selecting);
-    const ins={tap:c.tap,drag:c.drag,shake:c.shake};const stv=['soft','bouncy'].includes(ddCfg().jellyStrength)?ddCfg().jellyStrength:'mid';bar.querySelectorAll('[data-jb-strength]').forEach(b=>b.classList.toggle('is-active',b.dataset.jbStrength===stv));{const lab=$b('[data-jb-dd-label]');if(lab)lab.textContent={soft:'软糯',mid:'Q弹',bouncy:'DUANG'}[stv];}bar.querySelectorAll('[data-jb-in]').forEach(b=>b.classList.toggle('is-active',!!ins[b.dataset.jbIn]));
+    const ins={tap:c.tap,drag:c.drag,shake:c.shake,burst:c.burst};{const b=ddBurstCfg(),q=a=>bar.querySelector(a);q('[data-jb-bmode]').value=b.mode;q('[data-jb-bn]').value=b.n;q('[data-jb-bn-v]').textContent=b.n+' 次';q('[data-jb-bpow]').value=Math.round(b.power*100);q('[data-jb-bpow-v]').textContent=Math.round(b.power*100)+'%';q('[data-jb-bdecay]').checked=b.decay;q('[data-jb-burstrow]').hidden=!c.burst;}const stv=['soft','bouncy'].includes(ddCfg().jellyStrength)?ddCfg().jellyStrength:'mid';bar.querySelectorAll('[data-jb-strength]').forEach(b=>b.classList.toggle('is-active',b.dataset.jbStrength===stv));{const lab=$b('[data-jb-dd-label]');if(lab)lab.textContent={soft:'软糯',mid:'Q弹',bouncy:'DUANG'}[stv];}bar.querySelectorAll('[data-jb-in]').forEach(b=>b.classList.toggle('is-active',!!ins[b.dataset.jbIn]));
     {const pm=ddCfg().shakeMode==='pin';bar.querySelectorAll('[data-jb-mode]').forEach(b=>b.classList.toggle('is-active',b.dataset.jbMode===(pm?'pin':'select')));const pr=$b('[data-jb-pinrow]');if(pr)pr.hidden=!pm;const pi=$b('[data-jb-pin]');if(pi&&document.activeElement!==pi){pi.value=String(Math.round(Number(ddCfg().pinFixed)||0));}const po=$b('[data-jb-pin-value]');if(po)po.textContent=Math.round(Number(ddCfg().pinFixed)||0)+'%';}
     $b('[data-jb=sel]').classList.toggle('is-active',!!S.selecting);
     $b('.dd-jb-hint').textContent=S.has?'已选区（只有选中的地方会动）':'未选区（整张图都会动）';
@@ -440,6 +461,7 @@ function ddBuildBar(overlay,mountPoint=overlay){
    const rebind=()=>{const img=overlay.querySelector('img');ddAttachJelly(img);img?._ddJellyPrepare?.();paintBar();syncSettings();};
    bar.addEventListener('input',e=>{
     const pn=e.target.closest('[data-jb-pin]');if(pn){ddCfg().pinFixed=Number(pn.value);ddSave();$b('[data-jb-pin-value]').textContent=pn.value+'%';return;}
+    if(e.target.closest('[data-jb-bmode],[data-jb-bn],[data-jb-bpow],[data-jb-bdecay]')){const q=a=>bar.querySelector(a),c=ddCfg();c.jellyBurstMode=q('[data-jb-bmode]').value;c.jellyBurstN=Number(q('[data-jb-bn]').value);c.jellyBurstPower=Number(q('[data-jb-bpow]').value)/100;c.jellyBurstDecay=q('[data-jb-bdecay]').checked;ddSave();q('[data-jb-bn-v]').textContent=c.jellyBurstN+' 次';q('[data-jb-bpow-v]').textContent=Math.round(c.jellyBurstPower*100)+'%';return;}
     const fi=e.target.closest('[data-jb-feedback]');if(fi){ddCfg().feedbackRange=Number(fi.value);ddSave();syncFeedbackRange(fi);showFeedbackPreview(fi);return;}
     const bi=e.target.closest('[data-jb-brush]');if(!bi)return;e.stopPropagation();
     ddCfg().jellyBrush=Number(bi.value)/100;ddSave();
@@ -468,7 +490,7 @@ function ddBuildBar(overlay,mountPoint=overlay){
     if(d.jbDd!==undefined){const l=$b('.dd-jb-dd-list'),p=$b('.dd-jb-panel');l.hidden=!l.hidden;p.classList.toggle('is-dd-open',!l.hidden);b.setAttribute('aria-expanded',String(!l.hidden));return;}
     if(d.jbStrength){c.jellyStrength=d.jbStrength;ddSave();{const l=$b('.dd-jb-dd-list'),p=$b('.dd-jb-panel');l.hidden=true;p.classList.remove('is-dd-open');$b('[data-jb-dd]').setAttribute('aria-expanded','false');}rebind();return;}
     if(d.jbIn){
-     ddJellyCfg();const key={tap:'jellyTap',drag:'jellyDrag',shake:'jellyShake'}[d.jbIn];c[key]=!c[key];if(c[key])c.jellyOn=true;ddSave();
+     ddJellyCfg();const key={tap:'jellyTap',drag:'jellyDrag',shake:'jellyShake',burst:'jellyBurst'}[d.jbIn];c[key]=!c[key];if(c[key])c.jellyOn=true;ddSave();
      if(d.jbIn==='shake'&&c.jellyShake){setMsg('');await ddJellyEnableMotion(setMsg);}
      else if(d.jbIn==='shake')setMsg('');
      rebind();
@@ -503,7 +525,7 @@ async function setPetImage(blob){
  ddBuildBar(petRoot,jellySlot||petRoot);petRoot._ddPaintBar?.();await restoreMask(petImage);petImage._ddJellyPrepare?.();petRoot._ddPaintBar?.();
 }
 const GALLERY_KEY='pet-gallery';
-const GALLERY_CFG_KEYS=['enabled','jellyOn','jellyScope','jellyTap','jellyDrag','jellyShake','jellyStrength','jellyBrush','feedbackRange','jellyMode','shakeMode','pinFixed'];
+const GALLERY_CFG_KEYS=['enabled','jellyOn','jellyScope','jellyTap','jellyDrag','jellyShake','jellyStrength','jellyBrush','feedbackRange','jellyMode','shakeMode','pinFixed','jellyBurst','jellyBurstN','jellyBurstMode','jellyBurstDecay','jellyBurstPower'];
 async function getPetGallery(){const list=await dbGet(GALLERY_KEY);return Array.isArray(list)?list:[];}
 async function savePetToGallery(){
  if(!petImage||!petBlob)throw new Error('请先导入桌宠图片');if(petEraser)await ddSetEraser(false);
