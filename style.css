@@ -94,3 +94,6 @@ body>#lp-panel{--lp-panel:#fff;--lp-text:#171717;--lp-muted:#777;--lp-border:#de
 
 #lp-float .lp-float-close{display:none}
 #lp-float.is-framed .lp-float-close{display:flex;position:absolute;top:-40px;right:-6px;width:30px;height:30px;border-radius:50%;border:2px solid #fff;background:var(--SmartThemeQuoteColor,#ff7aa8);color:#fff;font-size:18px;line-height:1;align-items:center;justify-content:center;padding:0;cursor:pointer;box-shadow:0 1px 6px rgba(0,0,0,.35);z-index:19}
+
+#lp-float,#lp-float img,#lp-float canvas,.lp-stage img,.lp-stage canvas{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+#lp-float img,.lp-stage img{-webkit-user-drag:none}

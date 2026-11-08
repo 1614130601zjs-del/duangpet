@@ -690,6 +690,7 @@ function mount(){
    }else{
     f.style.left=Math.max(8,innerWidth-f.offsetWidth-24)+'px';f.style.top=Math.max(8,innerHeight-f.offsetHeight-100)+'px';
    }
+   f.addEventListener('contextmenu',e=>{e.preventDefault();},true);f.addEventListener('dragstart',e=>e.preventDefault(),true);
    let petHoldTimer=0,petHoldStart=null;f.addEventListener('pointerdown',e=>{if(!e.target.closest('.lp-image-host img'))return;petHoldStart={x:e.clientX,y:e.clientY,id:e.pointerId};clearTimeout(petHoldTimer);petHoldTimer=setTimeout(()=>{if(!petHoldStart)return;petHoldStart=null;returnPetToEditor();open();},620);},true);f.addEventListener('pointermove',e=>{if(!petHoldStart||petHoldStart.id!==e.pointerId)return;if(Math.hypot(e.clientX-petHoldStart.x,e.clientY-petHoldStart.y)>10){clearTimeout(petHoldTimer);petHoldStart=null;}},true);const clearPetHold=()=>{clearTimeout(petHoldTimer);petHoldStart=null;};f.addEventListener('pointerup',clearPetHold,true);f.addEventListener('pointercancel',clearPetHold,true);const dragZone=document.createElement('div');dragZone.className='lp-float-drag';dragZone.setAttribute('aria-label','移动桌宠');f.append(dragZone);
    // 双击桌宠（单击只做互动）：显出虚线边框、移动条和四角圆点，可以拖动、缩放；3.5 秒没操作或点到窗口外就收起。平时只做互动。
    let frameTimer=0,tapStart=null,lastTap=null;
