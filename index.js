@@ -98,11 +98,11 @@ function ddAttachJelly(img){
  if(wantPointer){img.draggable=false;img.style.touchAction='none';img.style.webkitUserDrag='none';}
  const MW=DD_JELLY_MW,MH=DD_JELLY_MH;
  let canvas=null,selCv=null,gl=null,prog=null,posBuf=null,idxCount=0,tex=null,texSrc='',cols=0,rows=0,pos=null,locPos=0,locSize=null,boxW=0,boxH=0,padX=0,padY=0,locOff=null,failed=false;
- let raf=0,press=null,cx=0,cy=0,lx=0,ly=0,ofx=null,ofy=null,ovx=null,ovy=null,mv=null,shw=null,baseX=null,baseY=null,localW=null,localW2=null,activeRanges=[],shown=false;const originalVisibility=img.style.visibility;
+ let raf=0,press=null,cx=0,cy=0,lx=0,ly=0,ofx=null,ofy=null,ovx=null,ovy=null,mv=null,shw=null,baseX=null,baseY=null,localW=null,localW2=null,activeRanges=[],shown=false;const originalOpacity=img.style.opacity;
  const dep={x:0,v:0,t:0,k:.3,d:.6},ox={x:0,v:0,t:0,k:.3,d:.7},oy={x:0,v:0,t:0,k:.3,d:.7};
  const aff={x:[0,0,1,1,0],v:[0,0,0,0,0],t:[0,0,1,1,0]};
  const shk={x:0,y:0,vx:0,vy:0};
- const destroy=()=>{cancelAnimationFrame(raf);raf=0;img.style.visibility=originalVisibility;try{canvas?.remove();}catch{}try{selCv?.remove();}catch{}canvas=null;selCv=null;gl=null;};
+ const destroy=()=>{cancelAnimationFrame(raf);raf=0;img.style.opacity=originalOpacity;try{canvas?.remove();}catch{}try{selCv?.remove();}catch{}canvas=null;selCv=null;gl=null;};
  ac.signal.addEventListener('abort',destroy);
   let bxCache=null;const box=()=>bxCache||(bxCache=boxMeasure());
  try{new ResizeObserver(()=>{bxCache=null;}).observe(img);}catch{}
@@ -273,9 +273,9 @@ function ddAttachJelly(img){
   if(ofx){for(let k=0;k<ofx.length;k++){if(!press||!press.smudging){ovx[k]+=(0-ofx[k])*.12;ovy[k]+=(0-ofy[k])*.12;ovx[k]*=.8;ovy[k]*=.8;ofx[k]+=ovx[k];ofy[k]+=ovy[k];}if(Math.abs(ofx[k])>.02||Math.abs(ofy[k])>.02||Math.abs(ovx[k])>.01||Math.abs(ovy[k])>.01)live=true;}}
   draw();
   if(live||(press&&!press.paint))raf=requestAnimationFrame(tick);
-  else{raf=0;restoreActiveMesh();canvas.style.display='none';img.style.visibility=originalVisibility;shown=false;resetAll();}
+  else{raf=0;restoreActiveMesh();canvas.style.display='none';img.style.opacity=originalOpacity;shown=false;resetAll();}
  };
- const show=()=>{if(canvas&&!shown){canvas.style.display='block';img.style.visibility='hidden';shown=true;}};
+ const show=()=>{if(canvas&&!shown){canvas.style.display='block';img.style.opacity='0';shown=true;}};
  const kick=()=>{if(!raf)raf=requestAnimationFrame(tick);};
  const local=e=>{const r=img.getBoundingClientRect(),bx=box(),sx=img.offsetWidth/Math.max(1,r.width),sy=img.offsetHeight/Math.max(1,r.height);return [Math.max(0,Math.min(boxW,(e.clientX-r.left)*sx-bx.left)),Math.max(0,Math.min(boxH,(e.clientY-r.top)*sy-bx.top))];};
  // 涂选区：自由手绘，高斯笔刷取最大值，边缘柔和
@@ -695,7 +695,7 @@ function mount(){
    f.addEventListener('dragstart',e=>e.preventDefault(),true);
    let petHoldTimer=0,petHoldStart=null;
    // 手机长按会先触发“右键菜单”：拦掉它，并把它当作长按本身，直接回编辑页（不再依赖后面的 0.62 秒计时，也不会被取消）。
-   f.addEventListener('contextmenu',e=>{e.preventDefault();if(!petHoldStart||!e.target.closest('.lp-image-host'))return;clearTimeout(petHoldTimer);petHoldStart=null;returnPetToEditor();open();},true);f.addEventListener('pointerdown',e=>{if(!e.target.closest('.lp-image-host img'))return;petHoldStart={x:e.clientX,y:e.clientY,id:e.pointerId};clearTimeout(petHoldTimer);petHoldTimer=setTimeout(()=>{if(!petHoldStart)return;petHoldStart=null;returnPetToEditor();open();},620);},true);f.addEventListener('pointermove',e=>{if(!petHoldStart||petHoldStart.id!==e.pointerId)return;if(Math.hypot(e.clientX-petHoldStart.x,e.clientY-petHoldStart.y)>10){clearTimeout(petHoldTimer);petHoldStart=null;}},true);const clearPetHold=()=>{clearTimeout(petHoldTimer);petHoldStart=null;};f.addEventListener('pointerup',clearPetHold,true);f.addEventListener('pointercancel',clearPetHold,true);const dragZone=document.createElement('div');dragZone.className='lp-float-drag';dragZone.setAttribute('aria-label','移动桌宠');f.append(dragZone);
+   f.addEventListener('contextmenu',e=>{e.preventDefault();if(!petHoldStart||!e.target.closest('.lp-image-host'))return;clearTimeout(petHoldTimer);petHoldStart=null;returnPetToEditor();open();},true);f.addEventListener('pointerdown',e=>{if(!e.target.closest('.lp-image-host'))return;petHoldStart={x:e.clientX,y:e.clientY,id:e.pointerId};clearTimeout(petHoldTimer);petHoldTimer=setTimeout(()=>{if(!petHoldStart)return;petHoldStart=null;returnPetToEditor();open();},620);},true);f.addEventListener('pointermove',e=>{if(!petHoldStart||petHoldStart.id!==e.pointerId)return;if(Math.hypot(e.clientX-petHoldStart.x,e.clientY-petHoldStart.y)>10){clearTimeout(petHoldTimer);petHoldStart=null;}},true);const clearPetHold=()=>{clearTimeout(petHoldTimer);petHoldStart=null;};f.addEventListener('pointerup',clearPetHold,true);f.addEventListener('pointercancel',clearPetHold,true);const dragZone=document.createElement('div');dragZone.className='lp-float-drag';dragZone.setAttribute('aria-label','移动桌宠');f.append(dragZone);
    // 双击桌宠（单击只做互动）：显出虚线边框、移动条和四角圆点，可以拖动、缩放；3.5 秒没操作或点到窗口外就收起。平时只做互动。
    let frameTimer=0,tapStart=null,lastTap=null;
    const hideFrame=()=>{clearTimeout(frameTimer);f.classList.remove('is-framed');};
